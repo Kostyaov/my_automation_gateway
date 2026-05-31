@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Whisper Transcription</title>
+    <link rel="stylesheet" href="/shared/theme.css" />
+    <script src="/shared/theme.js"></script>
+  </head>
+  <body>
+    <main class="page-shell narrow">
+      <a class="back-link" href="/">Назад до каталогу</a>
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">Whisper</h1>
+          <p class="page-subtitle">Запуск транскрибації локального файлу через фонову задачу FastAPI.</p>
+        </div>
+        <div class="header-actions">
+          <button class="theme-toggle" type="button" data-theme-toggle>Темна тема</button>
+        </div>
+      </header>
+
+      <form id="whisper-form" class="form-panel">
+        <label for="file-path">Шлях до файлу</label>
+        <input
+          id="file-path"
+          name="file_path"
+          type="text"
+          placeholder="/Users/kostya/Movies/interview.mp4"
+          autocomplete="off"
+          required
+        />
+        <button id="submit-button" class="primary-button" type="submit">Запустити</button>
+      </form>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

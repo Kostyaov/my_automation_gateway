@@ -1,0 +1,488 @@
+let nodes = {};
+let mediaFiles = [];
+let jobSocket = null;
+
+const operationConfig = {
+  replace_audio: {
+    video: true,
+    audio: true,
+    shortest: true,
+    description: "Replace the audio stream in a video file.",
+  },
+  extract_audio: {
+    input: "all",
+    extract: true,
+    description: "Extract audio from a media file.",
+  },
+  cut_media: {
+    input: "all",
+    cut: true,
+    copy: true,
+    description: "Cut a media file between two timestamps.",
+  },
+  convert_mp4: {
+    input: "all",
+    encode: true,
+    description: "Convert a media file to H.264/AAC MP4.",
+  },
+  compress_video: {
+    input: "video",
+    encode: true,
+    description: "Compress a video using H.264 CRF encoding.",
+  },
+  remove_audio: {
+    input: "video",
+    description: "Create a silent video copy.",
+  },
+  remux_mp4: {
+    input: "video",
+    description: "Rewrap compatible streams into an MP4 container.",
+  },
+};
+
+const inputLabels = {
+  video: "video file",
+  audio: "audio file",
+  input: "input file",
+};
+
+window.addEventListener("DOMContentLoaded", init);
+
+async function init() {
+  nodes = getNodes();
+  const missingNodes = Object.entries(nodes)
+    .filter(([, node]) => !node)
+    .map(([name]) => name);
+
+  if (missingNodes.length) {
+    console.error(`FFmpeg UI is missing nodes: ${missingNodes.join(", ")}`);
+    return;
+  }
+
+  bindEvents();
+  updateOperationView();
+  appendConsole("Ready. Pick an operation, choose files, and start a job.");
+  await loadFiles();
+}
+
+function getNodes() {
+  return {
+    form: document.querySelector("#ffmpeg-form"),
+    operation: document.querySelector("#operation"),
+    videoField: document.querySelector("#video-field"),
+    audioField: document.querySelector("#audio-field"),
+    inputField: document.querySelector("#input-field"),
+    videoFile: document.querySelector("#video-file"),
+    audioFile: document.querySelector("#audio-file"),
+    inputFile: document.querySelector("#input-file"),
+    videoUpload: document.querySelector("#video-upload"),
+    audioUpload: document.querySelector("#audio-upload"),
+    inputUpload: document.querySelector("#input-upload"),
+    videoUploadStatus: document.querySelector("#video-upload-status"),
+    audioUploadStatus: document.querySelector("#audio-upload-status"),
+    inputUploadStatus: document.querySelector("#input-upload-status"),
+    outputPath: document.querySelector("#output-path"),
+    startTime: document.querySelector("#start-time"),
+    stopTime: document.querySelector("#stop-time"),
+    audioFormat: document.querySelector("#audio-format"),
+    crf: document.querySelector("#crf"),
+    preset: document.querySelector("#preset"),
+    shortest: document.querySelector("#shortest"),
+    shortestRow: document.querySelector("#shortest-row"),
+    copyCodecs: document.querySelector("#copy-codecs"),
+    copyRow: document.querySelector("#copy-row"),
+    cutOptions: document.querySelector("#cut-options"),
+    extractOptions: document.querySelector("#extract-options"),
+    encodeOptions: document.querySelector("#encode-options"),
+    refreshFiles: document.querySelector("#refresh-files"),
+    startJob: document.querySelector("#start-job"),
+    formStatus: document.querySelector("#form-status"),
+    consoleOutput: document.querySelector("#console-output"),
+    jobState: document.querySelector("#job-state"),
+  };
+}
+
+function bindEvents() {
+  nodes.operation.addEventListener("change", updateOperationView);
+  nodes.refreshFiles.addEventListener("click", loadFiles);
+  nodes.form.addEventListener("submit", startJob);
+
+  bindFileChoice("video");
+  bindFileChoice("audio");
+  bindFileChoice("input");
+}
+
+function bindFileChoice(role) {
+  const uploadInput = uploadInputForRole(role);
+  const select = fileSelectForRole(role);
+
+  uploadInput.addEventListener("change", () => {
+    const file = uploadInput.files?.[0];
+    if (!file) {
+      setUploadStatus(role, defaultUploadHint(role));
+      return;
+    }
+    select.value = "";
+    setUploadStatus(role, `${file.name} is ready. It will upload when the job starts.`);
+    setFormStatus(`Ready to upload ${file.name}.`);
+  });
+
+  select.addEventListener("change", () => {
+    if (!select.value) return;
+    uploadInput.value = "";
+    setUploadStatus(role, defaultUploadHint(role));
+  });
+}
+
+async function loadFiles(options = {}) {
+  const silent = Boolean(options.silent);
+  if (!silent) {
+    setFormStatus("Refreshing files...");
+  }
+  try {
+    const response = await fetch("/api/ffmpeg/files", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(await readError(response));
+    }
+    const payload = await response.json();
+    mediaFiles = payload.files || [];
+    populateFileSelects();
+    updateOperationView();
+    if (!silent) {
+      setFormStatus(`Loaded ${mediaFiles.length} media files. Output folder: ${payload.output_dir}`);
+    }
+  } catch (error) {
+    setFormStatus(error.message, true);
+    appendConsole(`[ERROR] ${error.message}`);
+  }
+}
+
+function populateFileSelects(preserved = {}) {
+  const selected = {
+    video: preserved.video ?? nodes.videoFile.value,
+    audio: preserved.audio ?? nodes.audioFile.value,
+    input: preserved.input ?? nodes.inputFile.value,
+  };
+
+  fillSelect(nodes.videoFile, filesByKind("video"), "Select video...", "No video files found");
+  fillSelect(nodes.audioFile, filesByKind("audio"), "Select audio...", "No audio files found");
+  fillInputSelect(operationConfig[nodes.operation.value]);
+
+  restoreSelection(nodes.videoFile, selected.video);
+  restoreSelection(nodes.audioFile, selected.audio);
+  restoreSelection(nodes.inputFile, selected.input);
+}
+
+function fillInputSelect(config) {
+  if (config.input === "video") {
+    fillSelect(nodes.inputFile, filesByKind("video"), "Select video...", "No video files found");
+    return;
+  }
+  fillSelect(nodes.inputFile, mediaFiles, "Select input...", "No media files found");
+}
+
+function fillSelect(select, files, placeholder, emptyText) {
+  select.textContent = "";
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = files.length ? placeholder : emptyText;
+  select.append(empty);
+
+  for (const file of files) {
+    const option = document.createElement("option");
+    option.value = file.path;
+    option.textContent = `${file.name} · ${formatBytes(file.size)}`;
+    select.append(option);
+  }
+}
+
+function restoreSelection(select, value) {
+  if (!value) return;
+  const hasValue = Array.from(select.options).some((option) => option.value === value);
+  if (hasValue) {
+    select.value = value;
+  }
+}
+
+function filesByKind(kind) {
+  return mediaFiles.filter((file) => file.kind === kind);
+}
+
+function updateOperationView() {
+  const config = operationConfig[nodes.operation.value] || operationConfig.replace_audio;
+  nodes.videoField.classList.toggle("hidden", !config.video);
+  nodes.audioField.classList.toggle("hidden", !config.audio);
+  nodes.inputField.classList.toggle("hidden", !config.input);
+  nodes.cutOptions.classList.toggle("hidden", !config.cut);
+  nodes.extractOptions.classList.toggle("hidden", !config.extract);
+  nodes.encodeOptions.classList.toggle("hidden", !config.encode);
+  nodes.shortestRow.classList.toggle("hidden", !config.shortest);
+  nodes.copyRow.classList.toggle("hidden", !config.copy);
+  fillInputSelect(config);
+}
+
+async function startJob(event) {
+  event.preventDefault();
+
+  nodes.startJob.disabled = true;
+  nodes.startJob.textContent = "Preparing...";
+  setJobState("queued");
+  clearConsole();
+
+  try {
+    const payload = await buildPayload();
+    if (!payload) {
+      resetStartButton();
+      return;
+    }
+
+    appendConsole(`Queued operation: ${payload.operation}`);
+    if (payload.output_path) {
+      appendConsole(`Requested output: ${payload.output_path}`);
+    }
+    nodes.startJob.textContent = "Starting...";
+    setFormStatus("Starting FFmpeg job...");
+
+    const response = await fetch("/api/ffmpeg/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(await readError(response));
+    }
+    const data = await response.json();
+    const job = data.job;
+    appendConsole(`Job ID: ${job.id}`);
+    appendConsole(`Output: ${job.output_path}`);
+    nodes.startJob.textContent = "Running...";
+    connectJobSocket(job.id);
+  } catch (error) {
+    appendConsole(`[ERROR] ${error.message}`);
+    setFormStatus(error.message, true);
+    setJobState("failed");
+    resetStartButton();
+  }
+}
+
+async function buildPayload() {
+  const operation = nodes.operation.value;
+  const config = operationConfig[operation];
+  const payload = {
+    operation,
+    inputs: {},
+    options: {},
+  };
+
+  if (config.video) {
+    const video = await getFileChoice("video");
+    if (!video) return null;
+    payload.inputs.video = video;
+  }
+  if (config.audio) {
+    const audio = await getFileChoice("audio");
+    if (!audio) return null;
+    payload.inputs.audio = audio;
+  }
+  if (config.input) {
+    const input = await getFileChoice("input");
+    if (!input) return null;
+    payload.inputs.input = input;
+  }
+
+  const outputPath = nodes.outputPath.value.trim();
+  if (outputPath) {
+    payload.output_path = outputPath;
+  }
+  if (config.shortest) {
+    payload.options.shortest = nodes.shortest.checked;
+  }
+  if (config.copy) {
+    payload.options.copy = nodes.copyCodecs.checked;
+    payload.options.start_time = nodes.startTime.value.trim() || "00:00:00";
+    payload.options.stop_time = nodes.stopTime.value.trim();
+  }
+  if (config.extract) {
+    payload.options.format = nodes.audioFormat.value;
+  }
+  if (config.encode) {
+    const crf = nodes.crf.value.trim() || (operation === "compress_video" ? "28" : "23");
+    if (!isValidCrf(crf)) {
+      return invalid("CRF must be a number from 0 to 51.");
+    }
+    payload.options.crf = crf;
+    payload.options.preset = nodes.preset.value;
+  }
+
+  return payload;
+}
+
+async function getFileChoice(role) {
+  const uploadInput = uploadInputForRole(role);
+  const uploadFile = uploadInput.files?.[0];
+  if (uploadFile) {
+    return uploadLocalFile(role, uploadFile);
+  }
+
+  const select = fileSelectForRole(role);
+  if (select.value) {
+    return select.value;
+  }
+
+  return invalid(`Choose a ${inputLabels[role]}.`);
+}
+
+async function uploadLocalFile(role, file) {
+  setUploadStatus(role, `Uploading ${file.name}...`);
+  setFormStatus(`Uploading ${file.name}...`);
+  appendConsole(`[UPLOAD] ${file.name} (${formatBytes(file.size)})`);
+
+  const response = await fetch("/api/ffmpeg/uploads", {
+    method: "POST",
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+      "X-Filename": encodeURIComponent(file.name),
+    },
+    body: file,
+  });
+
+  if (!response.ok) {
+    const message = await readError(response);
+    setUploadStatus(role, message, true);
+    throw new Error(message);
+  }
+
+  const payload = await response.json();
+  const uploadedFile = payload.file;
+  mediaFiles = [
+    uploadedFile,
+    ...mediaFiles.filter((item) => item.path !== uploadedFile.path),
+  ];
+
+  uploadInputForRole(role).value = "";
+  populateFileSelects({ [role]: uploadedFile.path });
+  setUploadStatus(role, `Uploaded: ${uploadedFile.name}`);
+  appendConsole(`[UPLOAD] Saved as ${uploadedFile.path}`);
+  return uploadedFile.path;
+}
+
+function invalid(message) {
+  setFormStatus(message, true);
+  appendConsole(`[WARN] ${message}`);
+  return null;
+}
+
+function connectJobSocket(jobId) {
+  if (jobSocket) {
+    jobSocket.close();
+  }
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  jobSocket = new WebSocket(`${protocol}//${window.location.host}/api/ffmpeg/jobs/${jobId}/events`);
+
+  jobSocket.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === "status") {
+      setJobState(message.data.status);
+      return;
+    }
+    if (message.type === "log") {
+      appendConsole(message.data.message);
+      return;
+    }
+    if (message.type === "finished") {
+      setJobState("finished");
+      appendConsole(`[DONE] ${message.data.message}`);
+      setFormStatus(`Finished: ${message.data.output_path || message.data.message}`);
+      resetStartButton();
+      loadFiles({ silent: true });
+      return;
+    }
+    if (message.type === "error") {
+      setJobState("failed");
+      appendConsole(`[ERROR] ${message.data.message}`);
+      setFormStatus(message.data.message, true);
+      resetStartButton();
+    }
+  };
+
+  jobSocket.onerror = () => {
+    appendConsole("[ERROR] Console connection failed.");
+    setFormStatus("Console connection failed.", true);
+    resetStartButton();
+  };
+}
+
+function appendConsole(text) {
+  nodes.consoleOutput.textContent += `${text}\n`;
+  nodes.consoleOutput.scrollTop = nodes.consoleOutput.scrollHeight;
+}
+
+function clearConsole() {
+  nodes.consoleOutput.textContent = "";
+}
+
+function setJobState(state) {
+  nodes.jobState.textContent = state;
+  nodes.jobState.className = `state-pill ${state}`;
+}
+
+function setFormStatus(message, isError = false) {
+  nodes.formStatus.textContent = message;
+  nodes.formStatus.className = isError ? "status error" : "status";
+}
+
+function setUploadStatus(role, message, isError = false) {
+  const status = uploadStatusForRole(role);
+  status.textContent = message;
+  status.className = isError ? "field-hint error" : "field-hint";
+}
+
+function resetStartButton() {
+  nodes.startJob.disabled = false;
+  nodes.startJob.textContent = "Start job";
+}
+
+function fileSelectForRole(role) {
+  return nodes[`${role}File`];
+}
+
+function uploadInputForRole(role) {
+  return nodes[`${role}Upload`];
+}
+
+function uploadStatusForRole(role) {
+  return nodes[`${role}UploadStatus`];
+}
+
+function defaultUploadHint(role) {
+  if (role === "video") return "Use the list or upload a local video.";
+  if (role === "audio") return "Use the list or upload a local audio file.";
+  return "Use the list or upload a local media file.";
+}
+
+function isValidCrf(value) {
+  if (!/^\d+$/.test(value)) return false;
+  const number = Number(value);
+  return number >= 0 && number <= 51;
+}
+
+async function readError(response) {
+  try {
+    const payload = await response.json();
+    return payload.detail || JSON.stringify(payload);
+  } catch {
+    return response.statusText || "Request failed";
+  }
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}

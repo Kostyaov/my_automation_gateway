@@ -1,0 +1,207 @@
+.ffmpeg-workspace {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  margin: 0 auto;
+  width: min(1500px, 100%);
+}
+
+.ffmpeg-workspace > * {
+  min-width: 0;
+}
+
+.ffmpeg-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.panel-heading {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  padding-bottom: 12px;
+}
+
+.panel-heading > * {
+  min-width: 0;
+}
+
+.panel-heading h2,
+.eyebrow {
+  margin: 0;
+}
+
+.panel-heading h2 {
+  font-size: 1.1rem;
+  line-height: 1.2;
+}
+
+.eyebrow {
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.field {
+  color: var(--muted);
+  display: grid;
+  font-size: 0.82rem;
+  font-weight: 700;
+  gap: 7px;
+  min-width: 0;
+}
+
+.field span {
+  text-transform: uppercase;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.field-hint.error {
+  color: var(--danger);
+}
+
+.file-picker {
+  align-items: center;
+  background: var(--surface);
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  max-width: 100%;
+  min-height: 42px;
+  min-width: 0;
+  padding: 9px 12px;
+  text-align: center;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.file-picker:hover {
+  background: var(--panel-strong);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.file-picker input {
+  display: none;
+}
+
+.file-picker span {
+  overflow-wrap: anywhere;
+  text-transform: none;
+}
+
+.option-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.option-grid > * {
+  min-width: 0;
+}
+
+.check-row {
+  display: grid;
+  gap: 8px;
+}
+
+.check-row label {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  gap: 10px;
+}
+
+.check-row input {
+  accent-color: var(--accent);
+  height: 18px;
+  width: 18px;
+}
+
+.console-panel {
+  min-height: 560px;
+  min-width: 0;
+}
+
+.console-output {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--code-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  margin: 0;
+  min-height: 470px;
+  min-width: 0;
+  overflow: auto;
+  padding: 14px;
+  white-space: pre-wrap;
+}
+
+.state-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 5px 10px;
+  text-transform: uppercase;
+}
+
+.state-pill.running {
+  border-color: var(--focus);
+  color: var(--focus);
+}
+
+.state-pill.finished {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.state-pill.failed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+#start-job {
+  width: 100%;
+}
+
+@media (max-width: 1000px) {
+  .ffmpeg-workspace,
+  .option-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .console-panel {
+    min-height: 360px;
+  }
+
+  .console-output {
+    min-height: 280px;
+  }
+}

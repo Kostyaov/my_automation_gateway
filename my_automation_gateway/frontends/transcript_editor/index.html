@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Offline Transcript Editor</title>
+    <link rel="stylesheet" href="/shared/theme.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260523-sidebar-help" />
+    <script src="/shared/theme.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="kicker">Offline editor</p>
+          <h1>Transcript Sync Desk</h1>
+        </div>
+        <div class="topbar-actions">
+          <a class="button-link" href="/">Gateway</a>
+          <button class="theme-toggle" type="button" data-theme-toggle>Темна тема</button>
+          <button id="newProjectButton" class="ghost-button" type="button">New</button>
+          <button id="saveButton" class="primary-button" type="button" disabled>Save</button>
+        </div>
+      </header>
+
+      <section id="importPanel" class="import-panel">
+        <div class="field-grid">
+          <label class="file-field">
+            <span>Audio</span>
+            <input id="audioInput" type="file" accept="audio/*,video/mp4,video/quicktime" />
+          </label>
+          <label class="file-field">
+            <span>Transcript</span>
+            <input id="transcriptInput" type="file" accept=".csv,.srt,.vtt,.txt,.json,text/csv,text/plain,text/vtt,application/json" />
+          </label>
+          <button id="createButton" class="primary-button" type="button">Load editor</button>
+        </div>
+        <div id="recentPanel" class="recent-panel hidden">
+          <label for="recentProjects">Recent projects</label>
+          <select id="recentProjects"></select>
+          <button id="openRecentButton" type="button">Open</button>
+        </div>
+        <p id="importStatus" class="status-line"></p>
+      </section>
+
+      <section id="editorPanel" class="editor-panel hidden">
+        <aside class="side-panel">
+          <audio id="audioPlayer" controls preload="metadata"></audio>
+
+          <div class="tool-block">
+            <label for="searchInput">Search</label>
+            <input id="searchInput" type="search" placeholder="Find text" />
+          </div>
+
+          <div class="tool-block replace-block">
+            <label for="replaceInput">Replace</label>
+            <input id="replaceInput" type="text" placeholder="Replace with" />
+            <button id="replaceAllButton" type="button" disabled>Replace all</button>
+          </div>
+
+          <div class="tool-block">
+            <label for="rateInput">Speed</label>
+            <input id="rateInput" type="range" min="0.5" max="1.5" value="1" step="0.05" />
+            <output id="rateOutput">1.00x</output>
+          </div>
+
+          <div class="tool-block">
+            <label class="toggle-row">
+              <input id="timingToggle" type="checkbox" checked />
+              <span>Show timing</span>
+            </label>
+          </div>
+
+          <div class="tool-block">
+            <span class="block-label">Current time</span>
+            <div id="currentTime" class="time-readout">00:00:00,000</div>
+          </div>
+
+          <div class="tool-block export-block">
+            <span class="block-label">Export</span>
+            <div class="export-grid">
+              <button data-export="srt" type="button">SRT</button>
+              <button data-export="vtt" type="button">VTT</button>
+              <button data-export="csv" type="button">CSV</button>
+              <button data-export="txt" type="button">TXT</button>
+              <button data-export="json" type="button">JSON</button>
+            </div>
+          </div>
+
+          <div class="tool-block help-block">
+            <span class="block-label">Help</span>
+            <dl class="shortcut-list">
+              <div>
+                <dt>Space</dt>
+                <dd>Play / pause</dd>
+              </div>
+              <div>
+                <dt>Enter</dt>
+                <dd>Edit mode on / off</dd>
+              </div>
+              <div>
+                <dt>Cmd/Ctrl+Enter</dt>
+                <dd>New line</dd>
+              </div>
+              <div>
+                <dt>Cmd/Ctrl+S</dt>
+                <dd>Save</dd>
+              </div>
+              <div>
+                <dt>1-9</dt>
+                <dd>Set speaker</dd>
+              </div>
+              <div>
+                <dt>Arrow up/down</dt>
+                <dd>Move block</dd>
+              </div>
+              <div>
+                <dt>Arrow left/right</dt>
+                <dd>-5s / +5s</dd>
+              </div>
+            </dl>
+          </div>
+        </aside>
+
+        <section class="transcript-pane">
+          <div class="pane-toolbar">
+            <div>
+              <p id="projectName" class="project-name"></p>
+              <p id="segmentCount" class="muted"></p>
+              <p id="editorStatus" class="muted"></p>
+            </div>
+            <div class="toolbar-actions">
+              <button id="addSegmentButton" type="button">Add segment</button>
+              <button id="mergeButton" type="button" disabled>Merge next</button>
+              <button id="splitButton" type="button" disabled>Split text</button>
+              <button id="renameSpeakerButton" type="button" disabled>Rename speaker</button>
+            </div>
+          </div>
+          <div id="segmentsList" class="segments-list" aria-live="polite"></div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="renameSpeakerDialog" class="speaker-dialog">
+      <form method="dialog" class="speaker-dialog-content">
+        <div>
+          <p class="dialog-kicker">Speaker</p>
+          <h2>Rename speaker</h2>
+        </div>
+        <label>
+          <span>Current speaker</span>
+          <select id="renameSpeakerCurrent"></select>
+        </label>
+        <label>
+          <span>New name</span>
+          <input id="renameSpeakerNew" type="text" autocomplete="off" />
+        </label>
+        <p id="renameSpeakerStatus" class="dialog-status"></p>
+        <div class="dialog-actions">
+          <button id="cancelRenameSpeakerButton" type="button">Cancel</button>
+          <button id="confirmRenameSpeakerButton" class="primary-button" type="submit">Rename</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="segmentTemplate">
+      <article class="segment-row">
+        <button class="play-segment" type="button" title="Play from this segment" aria-label="Play from this segment"></button>
+        <div class="speaker-control">
+          <select class="speaker-input" aria-label="Speaker"></select>
+        </div>
+        <div class="time-controls">
+          <label>
+            <span>Start</span>
+            <input class="start-input" type="text" inputmode="decimal" />
+          </label>
+          <button class="set-start" type="button">Set</button>
+          <label>
+            <span>End</span>
+            <input class="end-input" type="text" inputmode="decimal" />
+          </label>
+          <button class="set-end" type="button">Set</button>
+        </div>
+        <div class="segment-preview"></div>
+        <textarea class="segment-text" rows="1" spellcheck="true"></textarea>
+      </article>
+    </template>
+
+    <script src="./app.js?v=20260527-replace-all" type="module"></script>
+  </body>
+</html>

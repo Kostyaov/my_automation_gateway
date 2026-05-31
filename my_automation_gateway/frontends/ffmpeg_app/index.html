@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FFmpeg Processing</title>
+    <link rel="stylesheet" href="/shared/theme.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260530-ffmpeg-layout" />
+    <script src="/shared/theme.js"></script>
+  </head>
+  <body>
+    <main class="module-shell">
+      <header class="module-topbar">
+        <div>
+          <p class="module-kicker">Оболонка для FFmpeg</p>
+          <h1 class="module-title">FFmpeg Processing</h1>
+        </div>
+        <div class="header-actions">
+          <a class="button-link" href="/">Gateway</a>
+          <button class="theme-toggle" type="button" data-theme-toggle>Темна тема</button>
+        </div>
+      </header>
+
+      <section class="ffmpeg-workspace">
+        <form id="ffmpeg-form" class="ffmpeg-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Operation</p>
+              <h2>FFmpeg job</h2>
+            </div>
+            <button id="refresh-files" type="button">Refresh files</button>
+          </div>
+
+          <label class="field">
+            <span>Operation</span>
+            <select id="operation">
+              <option value="replace_audio">Replace audio in video</option>
+              <option value="extract_audio">Extract audio</option>
+              <option value="cut_media">Cut media</option>
+              <option value="convert_mp4">Convert to MP4</option>
+              <option value="compress_video">Compress video</option>
+              <option value="remove_audio">Remove audio</option>
+              <option value="remux_mp4">Remux to MP4</option>
+            </select>
+          </label>
+
+          <div id="video-field" class="field">
+            <span>Video file</span>
+            <select id="video-file"></select>
+            <label class="file-picker">
+              <input id="video-upload" type="file" accept="video/*,.avi,.m4v,.mkv,.mov,.mp4,.webm" />
+              <span>Choose video from computer</span>
+            </label>
+            <small id="video-upload-status" class="field-hint">Use the list or upload a local video.</small>
+          </div>
+
+          <div id="audio-field" class="field">
+            <span>Audio file</span>
+            <select id="audio-file"></select>
+            <label class="file-picker">
+              <input id="audio-upload" type="file" accept="audio/*,.aac,.flac,.m4a,.mp3,.ogg,.opus,.wav" />
+              <span>Choose audio from computer</span>
+            </label>
+            <small id="audio-upload-status" class="field-hint">Use the list or upload a local audio file.</small>
+          </div>
+
+          <div id="input-field" class="field hidden">
+            <span>Input file</span>
+            <select id="input-file"></select>
+            <label class="file-picker">
+              <input id="input-upload" type="file" accept="audio/*,video/*,.aac,.avi,.flac,.m4a,.m4v,.mkv,.mov,.mp3,.mp4,.ogg,.opus,.wav,.webm" />
+              <span>Choose input from computer</span>
+            </label>
+            <small id="input-upload-status" class="field-hint">Use the list or upload a local media file.</small>
+          </div>
+
+          <div id="cut-options" class="option-grid hidden">
+            <label class="field">
+              <span>Start time</span>
+              <input id="start-time" type="text" value="00:00:00" placeholder="00:00:00" />
+            </label>
+            <label class="field">
+              <span>Stop time</span>
+              <input id="stop-time" type="text" placeholder="00:01:30" />
+            </label>
+          </div>
+
+          <div id="extract-options" class="option-grid hidden">
+            <label class="field">
+              <span>Audio format</span>
+              <select id="audio-format">
+                <option value="mp3">MP3</option>
+                <option value="m4a">M4A</option>
+                <option value="wav">WAV</option>
+                <option value="aac">AAC</option>
+                <option value="ogg">OGG</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="encode-options" class="option-grid hidden">
+            <label class="field">
+              <span>CRF</span>
+              <input id="crf" type="text" value="23" inputmode="numeric" />
+            </label>
+            <label class="field">
+              <span>Preset</span>
+              <select id="preset">
+                <option value="ultrafast">ultrafast</option>
+                <option value="veryfast">veryfast</option>
+                <option value="medium" selected>medium</option>
+                <option value="slow">slow</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Output path</span>
+            <input id="output-path" type="text" placeholder="Optional. Default: data/ffmpeg/outputs" />
+            <small class="field-hint">Leave empty for an automatic name, enter a filename for the output folder, or use an absolute path.</small>
+          </label>
+
+          <div class="check-row">
+            <label id="shortest-row">
+              <input id="shortest" type="checkbox" checked />
+              <span>Trim to shortest stream</span>
+            </label>
+            <label id="copy-row" class="hidden">
+              <input id="copy-codecs" type="checkbox" checked />
+              <span>Cut without re-encoding</span>
+            </label>
+          </div>
+
+          <button id="start-job" class="primary-button" type="submit">Start job</button>
+          <p id="form-status" class="status" role="status" aria-live="polite"></p>
+        </form>
+
+        <section class="ffmpeg-panel console-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Live output</p>
+              <h2>Console</h2>
+            </div>
+            <span id="job-state" class="state-pill">idle</span>
+          </div>
+          <pre id="console-output" class="console-output" aria-live="polite"></pre>
+        </section>
+      </section>
+    </main>
+    <script src="./script.js?v=20260530-ffmpeg-upload"></script>
+  </body>
+</html>
