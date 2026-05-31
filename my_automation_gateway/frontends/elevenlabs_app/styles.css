@@ -253,6 +253,10 @@
   width: 100%;
 }
 
+.folder-button {
+  width: 100%;
+}
+
 @media (max-width: 1000px) {
   .elevenlabs-workspace,
   .option-grid {

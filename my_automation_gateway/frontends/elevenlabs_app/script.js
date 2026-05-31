@@ -42,6 +42,7 @@ function getNodes() {
     zeroRetention: document.querySelector("#zero-retention"),
     createProject: document.querySelector("#create-project"),
     startJob: document.querySelector("#start-job"),
+    openTranscriptsFolder: document.querySelector("#open-transcripts-folder"),
     formStatus: document.querySelector("#form-status"),
     consoleOutput: document.querySelector("#console-output"),
     jobState: document.querySelector("#job-state"),
@@ -57,6 +58,7 @@ function getNodes() {
 
 function bindEvents() {
   nodes.form.addEventListener("submit", startJob);
+  nodes.openTranscriptsFolder.addEventListener("click", openTranscriptsFolder);
   nodes.mediaUpload.addEventListener("change", onUploadChoice);
   nodes.zeroRetention.addEventListener("change", () => {
     if (nodes.zeroRetention.checked) {
@@ -206,6 +208,29 @@ async function startJob(event) {
     setFormStatus(error.message, true);
     setJobState("failed");
     resetStartButton();
+  }
+}
+
+async function openTranscriptsFolder() {
+  nodes.openTranscriptsFolder.disabled = true;
+  setFormStatus("Opening transcripts folder...");
+
+  try {
+    const response = await fetch("/api/elevenlabs/open-output-folder", {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(await readError(response));
+    }
+
+    const payload = await response.json();
+    appendConsole(`[OPEN] Transcripts folder: ${payload.path}`);
+    setFormStatus("Transcripts folder opened.");
+  } catch (error) {
+    appendConsole(`[ERROR] ${error.message}`);
+    setFormStatus(error.message, true);
+  } finally {
+    nodes.openTranscriptsFolder.disabled = false;
   }
 }
 

@@ -435,7 +435,7 @@ elevenlabs_transcription.py
 Важливо:
 
 - Реальний API-виклик до ElevenLabs перевірений.
-- Локальна частина перевірена: сторінка, config endpoint, subscription endpoint, uploads endpoint, jobs endpoint, live console, export, створення Transcript Editor project.
+- Локальна частина перевірена: сторінка, config endpoint, subscription endpoint, uploads endpoint, jobs endpoint, відкриття output folder, live console, export, створення Transcript Editor project.
 
 Основні endpoint-и:
 
@@ -443,6 +443,7 @@ elevenlabs_transcription.py
 GET  /api/elevenlabs/config
 GET  /api/elevenlabs/subscription
 GET  /api/elevenlabs/files
+POST /api/elevenlabs/open-output-folder
 POST /api/elevenlabs/uploads
 POST /api/elevenlabs/jobs
 GET  /api/elevenlabs/jobs/{job_id}
@@ -643,6 +644,8 @@ Only users from the enterprise or trial tier can use ZRM mode.
 ```text
 data/elevenlabs/outputs/
 ```
+
+У ElevenLabs UI є кнопка `Open transcripts folder` під `Start transcription`. Вона викликає backend endpoint `POST /api/elevenlabs/open-output-folder` і відкриває цю папку в Finder на macOS.
 
 Якщо `Create Transcript Editor project` увімкнено, додатково створюється локальний проєкт:
 
@@ -1008,6 +1011,7 @@ ElevenLabs module API:
 GET  /api/elevenlabs/config
 GET  /api/elevenlabs/subscription
 GET  /api/elevenlabs/files
+POST /api/elevenlabs/open-output-folder
 POST /api/elevenlabs/uploads
 POST /api/elevenlabs/jobs
 GET  /api/elevenlabs/jobs/{job_id}

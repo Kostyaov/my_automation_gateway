@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import shlex
+import sys
 import unicodedata
 import uuid
 from datetime import datetime, timezone
@@ -942,6 +943,37 @@ async def elevenlabs_subscription() -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return public_elevenlabs_subscription(payload)
+
+
+@app.post("/api/elevenlabs/open-output-folder")
+async def open_elevenlabs_output_folder() -> dict[str, Any]:
+    ELEVENLABS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    if sys.platform == "darwin":
+        command = ["open", str(ELEVENLABS_OUTPUT_DIR)]
+    elif sys.platform.startswith("win"):
+        command = ["explorer", str(ELEVENLABS_OUTPUT_DIR)]
+    else:
+        command = ["xdg-open", str(ELEVENLABS_OUTPUT_DIR)]
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not open folder because {command[0]} is not available",
+        ) from exc
+
+    if process.returncode != 0:
+        message = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
+        raise HTTPException(status_code=500, detail=message or "Could not open transcripts folder")
+
+    return {"status": "opened", "path": str(ELEVENLABS_OUTPUT_DIR)}
 
 
 @app.get("/api/elevenlabs/files")
