@@ -1,5 +1,4 @@
 let nodes = {};
-let mediaFiles = [];
 let jobSocket = null;
 let hasApiKey = false;
 
@@ -18,7 +17,8 @@ async function init() {
   bindEvents();
   appendConsole("Ready. Configure ELEVENLABS_API_KEY, choose a file, and start transcription.");
   await loadConfig();
-  await Promise.all([loadFiles(), loadSubscription()]);
+  await loadSubscription();
+  setFormStatus("Choose a media file to upload.");
 }
 
 function getNodes() {
@@ -30,7 +30,6 @@ function getNodes() {
     creditsTier: document.querySelector("#credits-tier"),
     creditsFill: document.querySelector("#credits-fill"),
     creditsDetail: document.querySelector("#credits-detail"),
-    mediaFile: document.querySelector("#media-file"),
     mediaUpload: document.querySelector("#media-upload"),
     uploadStatus: document.querySelector("#upload-status"),
     modelId: document.querySelector("#model-id"),
@@ -42,7 +41,6 @@ function getNodes() {
     noVerbatim: document.querySelector("#no-verbatim"),
     zeroRetention: document.querySelector("#zero-retention"),
     createProject: document.querySelector("#create-project"),
-    refreshFiles: document.querySelector("#refresh-files"),
     startJob: document.querySelector("#start-job"),
     formStatus: document.querySelector("#form-status"),
     consoleOutput: document.querySelector("#console-output"),
@@ -58,17 +56,8 @@ function getNodes() {
 }
 
 function bindEvents() {
-  nodes.refreshFiles.addEventListener("click", () => {
-    loadFiles();
-    loadSubscription();
-  });
   nodes.form.addEventListener("submit", startJob);
   nodes.mediaUpload.addEventListener("change", onUploadChoice);
-  nodes.mediaFile.addEventListener("change", () => {
-    if (!nodes.mediaFile.value) return;
-    nodes.mediaUpload.value = "";
-    setUploadStatus("Use the list or upload a local audio/video file.");
-  });
   nodes.zeroRetention.addEventListener("change", () => {
     if (nodes.zeroRetention.checked) {
       setFormStatus("Zero retention mode requires an ElevenLabs Enterprise or Trial account.", true);
@@ -160,52 +149,12 @@ function renderSubscriptionPlaceholder(message, isError = false) {
   nodes.creditsFill.style.width = "0%";
 }
 
-async function loadFiles() {
-  setFormStatus("Refreshing files...");
-  try {
-    const response = await fetch("/api/elevenlabs/files", { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(await readError(response));
-    }
-    const payload = await response.json();
-    mediaFiles = payload.files || [];
-    populateFileSelect();
-    setFormStatus(`Loaded ${mediaFiles.length} media files. Output folder: ${payload.output_dir}`);
-  } catch (error) {
-    setFormStatus(error.message, true);
-    appendConsole(`[ERROR] ${error.message}`);
-  }
-}
-
-function populateFileSelect(selectedValue = nodes.mediaFile.value) {
-  nodes.mediaFile.textContent = "";
-  const empty = document.createElement("option");
-  empty.value = "";
-  empty.textContent = mediaFiles.length ? "Select media..." : "No audio/video files found";
-  nodes.mediaFile.append(empty);
-
-  for (const file of mediaFiles) {
-    const option = document.createElement("option");
-    option.value = file.path;
-    option.textContent = `${file.name} · ${file.kind} · ${formatBytes(file.size)}`;
-    nodes.mediaFile.append(option);
-  }
-
-  if (selectedValue) {
-    const hasValue = Array.from(nodes.mediaFile.options).some((option) => option.value === selectedValue);
-    if (hasValue) {
-      nodes.mediaFile.value = selectedValue;
-    }
-  }
-}
-
 function onUploadChoice() {
   const file = nodes.mediaUpload.files?.[0];
   if (!file) {
-    setUploadStatus("Use the list or upload a local audio/video file.");
+    setUploadStatus("Choose a local audio/video file. It will upload when the job starts.");
     return;
   }
-  nodes.mediaFile.value = "";
   setUploadStatus(`${file.name} is ready. It will upload when the job starts.`);
   setFormStatus(`Ready to upload ${file.name}.`);
 }
@@ -282,9 +231,6 @@ async function getFileChoice() {
   if (uploadFile) {
     return uploadLocalFile(uploadFile);
   }
-  if (nodes.mediaFile.value) {
-    return nodes.mediaFile.value;
-  }
   setFormStatus("Choose a media file.", true);
   appendConsole("[WARN] Choose a media file.");
   return null;
@@ -312,13 +258,7 @@ async function uploadLocalFile(file) {
 
   const payload = await response.json();
   const uploadedFile = payload.file;
-  mediaFiles = [
-    uploadedFile,
-    ...mediaFiles.filter((item) => item.path !== uploadedFile.path),
-  ];
-
   nodes.mediaUpload.value = "";
-  populateFileSelect(uploadedFile.path);
   setUploadStatus(`Uploaded: ${uploadedFile.name}`);
   appendConsole(`[UPLOAD] Saved as ${uploadedFile.path}`);
   return uploadedFile.path;
@@ -347,7 +287,6 @@ function connectJobSocket(jobId) {
       setFormStatus(message.data.message);
       showResults(jobId, message.data);
       resetStartButton();
-      loadFiles();
       loadSubscription();
       return;
     }

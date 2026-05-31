@@ -28,7 +28,6 @@
               <p class="eyebrow">Transcription</p>
               <h2>New job</h2>
             </div>
-            <button id="refresh-files" type="button">Refresh files</button>
           </div>
 
           <p id="api-status" class="status" role="status" aria-live="polite"></p>
@@ -49,12 +48,11 @@
 
           <div class="field">
             <span>Media file</span>
-            <select id="media-file"></select>
             <label class="file-picker">
               <input id="media-upload" type="file" accept="audio/*,video/*,.aac,.avi,.flac,.m4a,.m4v,.mkv,.mov,.mp3,.mp4,.ogg,.opus,.wav,.webm" />
               <span>Choose file from computer</span>
             </label>
-            <small id="upload-status" class="field-hint">Use the list or upload a local audio/video file.</small>
+            <small id="upload-status" class="field-hint">Choose a local audio/video file. It will upload when the job starts.</small>
           </div>
 
           <div class="option-grid">
@@ -139,6 +137,6 @@
         </section>
       </section>
     </main>
-    <script src="./script.js?v=20260531-elevenlabs-credits"></script>
+    <script src="./script.js?v=20260531-elevenlabs-upload-only"></script>
   </body>
 </html>

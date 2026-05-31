@@ -421,7 +421,7 @@ elevenlabs_transcription.py
 
 - Модуль уже доданий у Gateway як окрема вкладка `/elevenlabs_app/`.
 - Працює перевірка наявності `ELEVENLABS_API_KEY`.
-- Працює список audio/video файлів зі scan dirs.
+- UI працює у простому upload-only режимі: файл вибирається кнопкою `Choose file from computer`.
 - Працює upload локального файлу в `data/elevenlabs/inputs`.
 - Працює створення job через `/api/elevenlabs/jobs`.
 - Працює live console через WebSocket.
@@ -434,8 +434,8 @@ elevenlabs_transcription.py
 
 Важливо:
 
-- На момент створення модуля реальний API-виклик до ElevenLabs ще не перевірявся, бо потрібен реальний `ELEVENLABS_API_KEY`.
-- Локальна частина перевірена: сторінка, config endpoint, files endpoint, uploads endpoint, відмова без API key.
+- Реальний API-виклик до ElevenLabs перевірений.
+- Локальна частина перевірена: сторінка, config endpoint, subscription endpoint, uploads endpoint, jobs endpoint, live console, export, створення Transcript Editor project.
 
 Основні endpoint-и:
 
@@ -489,7 +489,7 @@ remaining = character_limit - character_count
 
 У термінології ElevenLabs ці поля історично називаються `character_count` і `character_limit`, але фактично відповідають поточним credits/usage акаунта.
 
-Блок оновлюється при відкритті сторінки, при натисканні `Refresh files` і після завершення ElevenLabs job.
+Блок оновлюється при відкритті сторінки і після завершення ElevenLabs job.
 
 Якщо ElevenLabs повертає помилку про відсутній `user_read`, це означає, що поточний API key може запускати transcription, але не має права читати subscription/billing usage. Для блоку credits треба увімкнути permission `user_read` для ключа або створити новий ключ з цим permission.
 
@@ -497,10 +497,7 @@ remaining = character_limit - character_count
 
 #### Media File
 
-Файл, який треба транскрибувати. Є два способи:
-
-- вибрати файл зі списку вже знайдених локальних audio/video файлів;
-- натиснути `Choose file from computer` і вибрати файл з комп'ютера.
+Файл, який треба транскрибувати. Поточний UI використовує тільки явний upload з комп'ютера через кнопку `Choose file from computer`.
 
 Якщо файл вибраний з комп'ютера, Gateway спочатку завантажує його в:
 
@@ -623,7 +620,7 @@ Only users from the enterprise or trial tier can use ZRM mode.
 
 Після натискання `Start transcription` виконується такий сценарій:
 
-1. Gateway бере файл зі списку або завантажує вибраний файл у `data/elevenlabs/inputs/`.
+1. Gateway завантажує вибраний файл у `data/elevenlabs/inputs/`.
 2. Backend створює job через `/api/elevenlabs/jobs`.
 3. Файл відправляється в ElevenLabs Speech to Text API.
 4. ElevenLabs повертає transcript у JSON.
@@ -1009,6 +1006,7 @@ ElevenLabs module API:
 
 ```http
 GET  /api/elevenlabs/config
+GET  /api/elevenlabs/subscription
 GET  /api/elevenlabs/files
 POST /api/elevenlabs/uploads
 POST /api/elevenlabs/jobs
