@@ -1,6 +1,7 @@
 let nodes = {};
 let mediaFiles = [];
 let jobSocket = null;
+let lastOutputPath = "";
 
 const operationConfig = {
   replace_audio: {
@@ -82,6 +83,7 @@ function getNodes() {
     audioUploadStatus: document.querySelector("#audio-upload-status"),
     inputUploadStatus: document.querySelector("#input-upload-status"),
     outputPath: document.querySelector("#output-path"),
+    chooseOutputFolder: document.querySelector("#choose-output-folder"),
     startTime: document.querySelector("#start-time"),
     stopTime: document.querySelector("#stop-time"),
     audioFormat: document.querySelector("#audio-format"),
@@ -96,6 +98,7 @@ function getNodes() {
     encodeOptions: document.querySelector("#encode-options"),
     refreshFiles: document.querySelector("#refresh-files"),
     startJob: document.querySelector("#start-job"),
+    openOutputsFolder: document.querySelector("#open-outputs-folder"),
     formStatus: document.querySelector("#form-status"),
     consoleOutput: document.querySelector("#console-output"),
     jobState: document.querySelector("#job-state"),
@@ -106,6 +109,8 @@ function bindEvents() {
   nodes.operation.addEventListener("change", updateOperationView);
   nodes.refreshFiles.addEventListener("click", loadFiles);
   nodes.form.addEventListener("submit", startJob);
+  nodes.chooseOutputFolder.addEventListener("click", chooseOutputFolder);
+  nodes.openOutputsFolder.addEventListener("click", openOutputsFolder);
 
   bindFileChoice("video");
   bindFileChoice("audio");
@@ -255,6 +260,7 @@ async function startJob(event) {
     const job = data.job;
     appendConsole(`Job ID: ${job.id}`);
     appendConsole(`Output: ${job.output_path}`);
+    lastOutputPath = job.output_path;
     nodes.startJob.textContent = "Running...";
     connectJobSocket(job.id);
   } catch (error) {
@@ -262,6 +268,58 @@ async function startJob(event) {
     setFormStatus(error.message, true);
     setJobState("failed");
     resetStartButton();
+  }
+}
+
+async function chooseOutputFolder() {
+  nodes.chooseOutputFolder.disabled = true;
+  setFormStatus("Choosing output folder...");
+
+  try {
+    const response = await fetch("/api/ffmpeg/select-output-folder", {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(await readError(response));
+    }
+
+    const payload = await response.json();
+    nodes.outputPath.value = payload.path;
+    appendConsole(`[OUTPUT] Folder selected: ${payload.path}`);
+    setFormStatus("Output folder selected.");
+  } catch (error) {
+    const isCancelled = error.message.toLowerCase().includes("cancelled");
+    appendConsole(isCancelled ? "[OUTPUT] Folder selection cancelled." : `[ERROR] ${error.message}`);
+    setFormStatus(isCancelled ? "Folder selection cancelled." : error.message, !isCancelled);
+  } finally {
+    nodes.chooseOutputFolder.disabled = false;
+  }
+}
+
+async function openOutputsFolder() {
+  nodes.openOutputsFolder.disabled = true;
+  setFormStatus("Opening output folder...");
+
+  const path = lastOutputPath || nodes.outputPath.value.trim();
+
+  try {
+    const response = await fetch("/api/ffmpeg/open-output-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (!response.ok) {
+      throw new Error(await readError(response));
+    }
+
+    const payload = await response.json();
+    appendConsole(`[OPEN] Output folder: ${payload.path}`);
+    setFormStatus("Output folder opened.");
+  } catch (error) {
+    appendConsole(`[ERROR] ${error.message}`);
+    setFormStatus(error.message, true);
+  } finally {
+    nodes.openOutputsFolder.disabled = false;
   }
 }
 
@@ -391,6 +449,9 @@ function connectJobSocket(jobId) {
     }
     if (message.type === "finished") {
       setJobState("finished");
+      if (message.data.output_path) {
+        lastOutputPath = message.data.output_path;
+      }
       appendConsole(`[DONE] ${message.data.message}`);
       setFormStatus(`Finished: ${message.data.output_path || message.data.message}`);
       resetStartButton();

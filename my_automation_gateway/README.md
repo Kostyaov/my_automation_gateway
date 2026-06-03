@@ -724,8 +724,11 @@ frontends/ffmpeg_app/script.js
 - Live console працює через WebSocket.
 - `Output path` працює:
   - порожнє поле означає автоматичну назву в `data/ffmpeg/outputs`;
+  - кнопка `Choose folder` відкриває системний вибір папки і записує результат у `Output path`;
   - просте ім'я файлу теж пишеться в `data/ffmpeg/outputs`;
-  - абсолютний шлях пише у вказану директорію.
+  - якщо `Output path` є існуючою папкою, backend збереже файл у цю папку з автоматичною назвою;
+  - абсолютний шлях до файлу пише у вказану директорію.
+- Кнопка `Open output folder` відкриває папку останнього результату або стандартну `data/ffmpeg/outputs`.
 
 ### FFmpeg Scan Dirs
 
@@ -792,6 +795,8 @@ Subtitle: .srt, .vtt, .ass
 ```http
 GET  /api/ffmpeg/operations
 GET  /api/ffmpeg/files
+POST /api/ffmpeg/select-output-folder
+POST /api/ffmpeg/open-output-folder
 POST /api/ffmpeg/uploads
 POST /api/ffmpeg/jobs
 GET  /api/ffmpeg/jobs/{job_id}
@@ -1005,6 +1010,8 @@ POST /api/ffmpeg
 ```http
 GET  /api/ffmpeg/operations
 GET  /api/ffmpeg/files
+POST /api/ffmpeg/select-output-folder
+POST /api/ffmpeg/open-output-folder
 POST /api/ffmpeg/uploads
 POST /api/ffmpeg/jobs
 GET  /api/ffmpeg/jobs/{job_id}

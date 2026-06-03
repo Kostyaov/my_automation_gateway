@@ -123,6 +123,17 @@
   min-width: 0;
 }
 
+.path-control {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.path-control button {
+  white-space: nowrap;
+}
+
 .check-row {
   display: grid;
   gap: 8px;
@@ -142,6 +153,7 @@
 }
 
 .console-panel {
+  align-content: start;
   min-height: 560px;
   min-width: 0;
 }
@@ -153,9 +165,11 @@
   color: var(--code-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 0.85rem;
+  height: clamp(360px, calc(100vh - 300px), 520px);
   line-height: 1.45;
   margin: 0;
-  min-height: 470px;
+  max-height: 520px;
+  min-height: 0;
   min-width: 0;
   overflow: auto;
   padding: 14px;
@@ -191,9 +205,14 @@
   width: 100%;
 }
 
+.folder-button {
+  width: 100%;
+}
+
 @media (max-width: 1000px) {
   .ffmpeg-workspace,
-  .option-grid {
+  .option-grid,
+  .path-control {
     grid-template-columns: 1fr;
   }
 
@@ -202,6 +221,7 @@
   }
 
   .console-output {
-    min-height: 280px;
+    height: 280px;
+    max-height: 280px;
   }
 }

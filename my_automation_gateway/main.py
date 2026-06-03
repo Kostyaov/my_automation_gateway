@@ -74,6 +74,10 @@ class FFmpegJobRequest(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class FolderOpenRequest(BaseModel):
+    path: str | None = None
+
+
 class ElevenLabsJobRequest(BaseModel):
     file_path: str = Field(min_length=1)
     model_id: str = DEFAULT_MODEL_ID
@@ -332,11 +336,92 @@ def resolve_output_path(output_path: str | None, default_name: str) -> Path:
         candidate = Path(output_path).expanduser()
         if not candidate.is_absolute():
             candidate = FFMPEG_OUTPUT_DIR / candidate
+        if candidate.exists() and candidate.is_dir():
+            candidate = candidate / default_name
     else:
         candidate = FFMPEG_OUTPUT_DIR / default_name
 
     candidate.parent.mkdir(parents=True, exist_ok=True)
     return candidate.resolve()
+
+
+async def run_desktop_command(command: list[str]) -> tuple[int, str, str]:
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not run {command[0]} because it is not available",
+        ) from exc
+
+    return (
+        process.returncode,
+        stdout.decode(errors="replace").strip(),
+        stderr.decode(errors="replace").strip(),
+    )
+
+
+async def open_local_folder(path: Path, label: str) -> dict[str, str]:
+    path.mkdir(parents=True, exist_ok=True)
+
+    if sys.platform == "darwin":
+        command = ["open", str(path)]
+    elif sys.platform.startswith("win"):
+        command = ["explorer", str(path)]
+    else:
+        command = ["xdg-open", str(path)]
+
+    returncode, stdout, stderr = await run_desktop_command(command)
+    if returncode != 0:
+        raise HTTPException(status_code=500, detail=stderr or stdout or f"Could not open {label}")
+
+    return {"status": "opened", "path": str(path)}
+
+
+def output_folder_from_request(path: str | None) -> Path:
+    if not path or not path.strip():
+        return FFMPEG_OUTPUT_DIR
+
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = FFMPEG_OUTPUT_DIR / candidate
+
+    if candidate.exists() and candidate.is_dir():
+        return candidate.resolve()
+
+    return candidate.parent.resolve()
+
+
+def folder_picker_command(title: str, initial_directory: Path) -> list[str]:
+    if sys.platform == "darwin":
+        script = f'POSIX path of (choose folder with prompt "{title}" default location POSIX file "{initial_directory}")'
+        return ["osascript", "-e", script]
+
+    if sys.platform.startswith("win"):
+        selected_path = str(initial_directory).replace("'", "''")
+        script = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            f"$dialog.Description = '{title}'; "
+            f"$dialog.SelectedPath = '{selected_path}'; "
+            "$dialog.ShowNewFolderButton = $true; "
+            "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) "
+            "{ [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output $dialog.SelectedPath; exit 0 } "
+            "exit 2"
+        )
+        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
+
+    if shutil.which("zenity"):
+        return ["zenity", "--file-selection", "--directory", f"--title={title}", f"--filename={initial_directory}/"]
+    if shutil.which("kdialog"):
+        return ["kdialog", "--getexistingdirectory", str(initial_directory), "--title", title]
+
+    raise HTTPException(status_code=500, detail="Install zenity or kdialog to choose folders on Linux")
 
 
 def output_name(input_path: Path, suffix: str, extension: str | None = None) -> str:
@@ -787,6 +872,34 @@ async def list_ffmpeg_files() -> dict[str, Any]:
         "output_dir": str(FFMPEG_OUTPUT_DIR),
         "files": list_media_files(),
     }
+
+
+@app.post("/api/ffmpeg/select-output-folder")
+async def select_ffmpeg_output_folder() -> dict[str, str]:
+    FFMPEG_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    command = folder_picker_command("Choose FFmpeg output folder", FFMPEG_OUTPUT_DIR.resolve())
+    returncode, stdout, stderr = await run_desktop_command(command)
+
+    if returncode != 0:
+        message = stderr or stdout
+        if returncode in {1, 2} or "cancel" in message.lower():
+            raise HTTPException(status_code=400, detail="Folder selection cancelled")
+        raise HTTPException(status_code=500, detail=message or "Could not choose output folder")
+
+    if not stdout:
+        raise HTTPException(status_code=400, detail="Folder selection cancelled")
+
+    path = Path(stdout).expanduser().resolve()
+    if not path.exists() or not path.is_dir():
+        raise HTTPException(status_code=400, detail="Selected output folder does not exist")
+
+    return {"status": "selected", "path": str(path)}
+
+
+@app.post("/api/ffmpeg/open-output-folder")
+async def open_ffmpeg_output_folder(request: FolderOpenRequest | None = None) -> dict[str, str]:
+    path = output_folder_from_request(request.path if request else None)
+    return await open_local_folder(path, "FFmpeg output folder")
 
 
 @app.post("/api/ffmpeg/uploads")
