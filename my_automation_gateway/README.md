@@ -67,7 +67,13 @@ pip install -r requirements.txt
 ../start.command
 ```
 
-Цей файл сам переходить у `my_automation_gateway`, створює `.venv` за потреби, встановлює залежності, відкриває браузер і запускає `uvicorn`.
+На Windows аналогічний запуск доступний через batch-файл:
+
+```text
+../start.bat
+```
+
+Ці файли самі переходять у `my_automation_gateway`, підхоплюють `.env`, створюють `.venv` за потреби, встановлюють залежності, відкривають браузер і запускають `uvicorn`.
 
 Відкрити в браузері:
 
@@ -113,7 +119,7 @@ ElevenLabs API key задається через environment variable:
 export ELEVENLABS_API_KEY="your_api_key"
 ```
 
-Для запуску через `start.command` зручно створити файл:
+Для запуску через `start.command` або `start.bat` зручно створити файл:
 
 ```text
 my_automation_gateway/.env
