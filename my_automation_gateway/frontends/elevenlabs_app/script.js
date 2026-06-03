@@ -126,7 +126,7 @@ function renderSubscription(subscription) {
     nodes.creditsSummary.textContent = hasRemaining
       ? `${formatNumber(remaining)} credits left`
       : `${formatNumber(used)} of ${formatNumber(limit)} used`;
-    nodes.creditsDetail.textContent = `${formatNumber(used)} used of ${formatNumber(limit)} · ${subscription.status || "status unknown"}`;
+    nodes.creditsDetail.textContent = "Approx. 700-750 credits per 1 hour of audio.";
     nodes.creditsFill.style.width = `${safePercent}%`;
 
     if (remainingRatio <= 0.1) {
