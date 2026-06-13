@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 import json
 import logging
 import mimetypes
@@ -6,6 +7,8 @@ import os
 import re
 import shutil
 import shlex
+import signal
+import subprocess
 import sys
 import unicodedata
 import uuid
@@ -44,22 +47,21 @@ TRANSCRIPT_DATA_DIR = ROOT / "data" / "projects"
 FFMPEG_DATA_DIR = ROOT / "data" / "ffmpeg"
 FFMPEG_INPUT_DIR = FFMPEG_DATA_DIR / "inputs"
 FFMPEG_OUTPUT_DIR = FFMPEG_DATA_DIR / "outputs"
+WEB_DLP_DATA_DIR = ROOT / "data" / "web_dlp"
+WEB_DLP_OUTPUT_DIR = WEB_DLP_DATA_DIR / "outputs"
 ELEVENLABS_DATA_DIR = ROOT / "data" / "elevenlabs"
 ELEVENLABS_INPUT_DIR = ELEVENLABS_DATA_DIR / "inputs"
 ELEVENLABS_OUTPUT_DIR = ELEVENLABS_DATA_DIR / "outputs"
 TRANSCRIPT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 FFMPEG_INPUT_DIR.mkdir(parents=True, exist_ok=True)
 FFMPEG_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+WEB_DLP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 ELEVENLABS_INPUT_DIR.mkdir(parents=True, exist_ok=True)
 ELEVENLABS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-whisper_semaphore = asyncio.Semaphore(1)
 ffmpeg_semaphore = asyncio.Semaphore(1)
+web_dlp_semaphore = asyncio.Semaphore(1)
 elevenlabs_semaphore = asyncio.Semaphore(1)
-
-
-class WhisperRequest(BaseModel):
-    file_path: str
 
 
 class FFmpegRequest(BaseModel):
@@ -70,6 +72,13 @@ class FFmpegRequest(BaseModel):
 class FFmpegJobRequest(BaseModel):
     operation: str = Field(min_length=1)
     inputs: dict[str, str] = Field(default_factory=dict)
+    output_path: str | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class WebDlpJobRequest(BaseModel):
+    url: str = Field(min_length=1)
+    operation: str = "download_video"
     output_path: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
 
@@ -112,6 +121,9 @@ class ProjectUpdate(BaseModel):
 ffmpeg_jobs: dict[str, dict[str, Any]] = {}
 ffmpeg_event_history: dict[str, list[dict[str, Any]]] = {}
 ffmpeg_event_queues: dict[str, set[asyncio.Queue]] = {}
+web_dlp_jobs: dict[str, dict[str, Any]] = {}
+web_dlp_event_history: dict[str, list[dict[str, Any]]] = {}
+web_dlp_event_queues: dict[str, set[asyncio.Queue]] = {}
 elevenlabs_jobs: dict[str, dict[str, Any]] = {}
 elevenlabs_event_history: dict[str, list[dict[str, Any]]] = {}
 elevenlabs_event_queues: dict[str, set[asyncio.Queue]] = {}
@@ -139,13 +151,6 @@ async def run_shell_command(command: str, task_name: str) -> None:
         logging.info("%s finished successfully", task_name)
     else:
         logging.error("%s failed with exit code %s", task_name, process.returncode)
-
-
-async def run_whisper_worker(file_path: str) -> None:
-    async with whisper_semaphore:
-        logging.info("Starting whisper task for %s", file_path)
-        command = f"whisper {shlex.quote(file_path)} --threads 4 --model base"
-        await run_shell_command(command, "whisper")
 
 
 async def run_ffmpeg_worker(file_path: str, output_path: str) -> None:
@@ -429,6 +434,152 @@ def output_name(input_path: Path, suffix: str, extension: str | None = None) -> 
     return f"{input_path.stem}_{suffix}{ext}"
 
 
+WEB_DLP_OPERATIONS = {
+    "download_video",
+    "extract_audio",
+    "download_subtitles",
+    "metadata",
+}
+
+WEB_DLP_QUALITY_FORMATS = {
+    "best": "bv*+ba/b",
+    "1080": "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]",
+    "720": "bv*[height<=720]+ba/b[height<=720]/best[height<=720]",
+    "480": "bv*[height<=480]+ba/b[height<=480]/best[height<=480]",
+}
+
+WEB_DLP_AUDIO_FORMATS = {"mp3", "m4a", "opus", "wav", "flac"}
+WEB_DLP_COOKIE_BROWSERS = {"", "chrome", "firefox", "edge", "safari", "brave", "chromium"}
+
+
+def web_dlp_option_bool(options: dict[str, Any], key: str, default: bool) -> bool:
+    value = options.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def web_dlp_option_str(options: dict[str, Any], key: str, default: str) -> str:
+    value = str(options.get(key, default)).strip()
+    return value or default
+
+
+def yt_dlp_available() -> bool:
+    return importlib.util.find_spec("yt_dlp") is not None or shutil.which("yt-dlp") is not None
+
+
+def yt_dlp_base_command() -> list[str]:
+    if importlib.util.find_spec("yt_dlp") is not None:
+        return [sys.executable, "-m", "yt_dlp"]
+    executable = shutil.which("yt-dlp")
+    if executable:
+        return [executable]
+    return [sys.executable, "-m", "yt_dlp"]
+
+
+def validate_web_dlp_url(url: str) -> str:
+    value = url.strip()
+    if not re.match(r"^https?://", value, flags=re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
+    return value
+
+
+def resolve_web_dlp_output_dir(output_path: str | None) -> Path:
+    if output_path and output_path.strip():
+        candidate = Path(output_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = WEB_DLP_OUTPUT_DIR / candidate
+        if candidate.suffix:
+            candidate = candidate.parent
+    else:
+        candidate = WEB_DLP_OUTPUT_DIR
+
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate.resolve()
+
+
+def build_web_dlp_command(payload: WebDlpJobRequest) -> tuple[list[str], Path]:
+    operation = payload.operation.strip() or "download_video"
+    if operation not in WEB_DLP_OPERATIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported operation: {operation}")
+
+    url = validate_web_dlp_url(payload.url)
+    output_dir = resolve_web_dlp_output_dir(payload.output_path)
+    options = payload.options
+    command = [
+        *yt_dlp_base_command(),
+        "--newline",
+        "--no-color",
+        "--windows-filenames",
+        "-P",
+        str(output_dir),
+        "-o",
+        "%(title).200s [%(id)s].%(ext)s",
+    ]
+
+    if web_dlp_option_bool(options, "no_playlist", True):
+        command.append("--no-playlist")
+
+    cookie_browser = web_dlp_option_str(options, "cookies_browser", "").lower()
+    if cookie_browser not in WEB_DLP_COOKIE_BROWSERS:
+        raise HTTPException(status_code=400, detail="Unsupported cookies browser")
+    if cookie_browser:
+        command.extend(["--cookies-from-browser", cookie_browser])
+
+    if operation == "download_video":
+        quality = web_dlp_option_str(options, "quality", "best")
+        format_selector = WEB_DLP_QUALITY_FORMATS.get(quality)
+        if not format_selector:
+            raise HTTPException(status_code=400, detail="Unsupported video quality")
+        command.extend(["-f", format_selector, "--merge-output-format", "mp4"])
+    elif operation == "extract_audio":
+        audio_format = web_dlp_option_str(options, "audio_format", "mp3").lower()
+        if audio_format not in WEB_DLP_AUDIO_FORMATS:
+            raise HTTPException(status_code=400, detail="Unsupported audio format")
+        command.extend(["-x", "--audio-format", audio_format, "--audio-quality", "0"])
+    elif operation == "download_subtitles":
+        language = web_dlp_option_str(options, "subtitle_languages", "uk,en,ru")
+        command.extend(["--skip-download", "--write-subs", "--sub-langs", language, "--convert-subs", "srt"])
+        if web_dlp_option_bool(options, "write_auto_subs", True):
+            command.append("--write-auto-subs")
+    elif operation == "metadata":
+        command.extend(["--skip-download", "--write-info-json"])
+        if web_dlp_option_bool(options, "write_thumbnail", True):
+            command.append("--write-thumbnail")
+
+    command.append(url)
+    return command, output_dir
+
+
+def build_web_dlp_update_command() -> list[str]:
+    return [sys.executable, "-m", "pip", "install", "-U", "yt-dlp"]
+
+
+def web_dlp_process_kwargs() -> dict[str, Any]:
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"preexec_fn": os.setsid}
+
+
+def terminate_web_dlp_process(process: asyncio.subprocess.Process, force: bool = False) -> None:
+    if process.returncode is not None:
+        return
+
+    if os.name == "nt":
+        if force:
+            process.kill()
+        else:
+            process.terminate()
+        return
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+
 def ffmpeg_option_bool(options: dict[str, Any], key: str, default: bool) -> bool:
     value = options.get(key, default)
     if isinstance(value, bool):
@@ -668,6 +819,137 @@ async def run_ffmpeg_job(job_id: str) -> None:
             )
 
 
+def public_web_dlp_job(job: dict[str, Any]) -> dict[str, Any]:
+    hidden = {"command", "process"}
+    return {key: value for key, value in job.items() if key not in hidden}
+
+
+async def publish_web_dlp_event(job_id: str, event_type: str, data: dict[str, Any]) -> None:
+    event = {
+        "type": event_type,
+        "data": data,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    history = web_dlp_event_history.setdefault(job_id, [])
+    history.append(event)
+    del history[:-500]
+
+    for queue in list(web_dlp_event_queues.get(job_id, set())):
+        try:
+            queue.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
+
+
+async def read_web_dlp_stream(job_id: str, stream: asyncio.StreamReader, label: str) -> None:
+    while True:
+        line = await stream.readline()
+        if not line:
+            break
+        text = line.decode(errors="replace").rstrip()
+        if text:
+            await publish_web_dlp_event(job_id, "log", {"stream": label, "message": text})
+
+
+async def force_kill_web_dlp_process_later(
+    job_id: str,
+    process: asyncio.subprocess.Process,
+    delay_seconds: float = 5,
+) -> None:
+    await asyncio.sleep(delay_seconds)
+    if process.returncode is None:
+        await publish_web_dlp_event(
+            job_id,
+            "log",
+            {"message": "[CANCEL] Process did not stop gracefully; forcing shutdown."},
+        )
+        terminate_web_dlp_process(process, force=True)
+
+
+async def mark_web_dlp_job_cancelled(job_id: str, message: str = "Web-DLP job cancelled.") -> None:
+    job = web_dlp_jobs[job_id]
+    job["status"] = "cancelled"
+    job["finished_at"] = datetime.now(timezone.utc).isoformat()
+    job["error"] = message
+    await publish_web_dlp_event(job_id, "status", {"status": "cancelled"})
+    await publish_web_dlp_event(job_id, "cancelled", {"status": "cancelled", "message": message})
+
+
+async def run_web_dlp_job(job_id: str) -> None:
+    job = web_dlp_jobs[job_id]
+    command = job["command"]
+
+    async with web_dlp_semaphore:
+        if job.get("status") == "cancelled":
+            return
+        if job.get("cancel_requested"):
+            await mark_web_dlp_job_cancelled(job_id)
+            return
+
+        job["status"] = "running"
+        job["started_at"] = datetime.now(timezone.utc).isoformat()
+        await publish_web_dlp_event(job_id, "status", {"status": "running"})
+        await publish_web_dlp_event(job_id, "log", {"message": "Running: " + shlex.join(command)})
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                cwd=str(ROOT),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                **web_dlp_process_kwargs(),
+            )
+        except FileNotFoundError as exc:
+            job["status"] = "failed"
+            job["finished_at"] = datetime.now(timezone.utc).isoformat()
+            job["error"] = str(exc)
+            await publish_web_dlp_event(
+                job_id,
+                "error",
+                {"status": "failed", "message": f"Could not start Web-DLP job: {exc}"},
+            )
+            return
+
+        job["pid"] = process.pid
+        job["process"] = process
+        await asyncio.gather(
+            read_web_dlp_stream(job_id, process.stdout, "stdout"),
+            read_web_dlp_stream(job_id, process.stderr, "stderr"),
+        )
+        return_code = await process.wait()
+
+        job["return_code"] = return_code
+        job["finished_at"] = datetime.now(timezone.utc).isoformat()
+        job["process"] = None
+        if job.get("cancel_requested"):
+            await mark_web_dlp_job_cancelled(job_id)
+            return
+
+        if return_code == 0:
+            job["status"] = "finished"
+            await publish_web_dlp_event(
+                job_id,
+                "finished",
+                {
+                    "status": "finished",
+                    "output_path": job.get("output_path"),
+                    "message": f"Finished: {job['operation']}",
+                },
+            )
+        else:
+            job["status"] = "failed"
+            job["error"] = f"Web-DLP failed with exit code {return_code}"
+            await publish_web_dlp_event(
+                job_id,
+                "error",
+                {
+                    "status": "failed",
+                    "return_code": return_code,
+                    "message": job["error"],
+                },
+            )
+
+
 def elevenlabs_api_key() -> str:
     return os.getenv("ELEVENLABS_API_KEY", "").strip()
 
@@ -837,10 +1119,153 @@ async def run_elevenlabs_job(job_id: str) -> None:
             )
 
 
-@app.post("/api/whisper")
-async def start_whisper(request: WhisperRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_whisper_worker, request.file_path)
-    return {"status": "accepted", "task": "whisper"}
+@app.get("/api/web-dlp/config")
+async def web_dlp_config() -> dict[str, Any]:
+    return {
+        "has_yt_dlp": yt_dlp_available(),
+        "output_dir": str(WEB_DLP_OUTPUT_DIR),
+        "operations": sorted(WEB_DLP_OPERATIONS),
+        "quality_options": sorted(WEB_DLP_QUALITY_FORMATS),
+        "audio_formats": sorted(WEB_DLP_AUDIO_FORMATS),
+        "cookie_browsers": sorted(browser for browser in WEB_DLP_COOKIE_BROWSERS if browser),
+    }
+
+
+@app.post("/api/web-dlp/select-output-folder")
+async def select_web_dlp_output_folder() -> dict[str, str]:
+    WEB_DLP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    command = folder_picker_command("Choose Web-DLP output folder", WEB_DLP_OUTPUT_DIR.resolve())
+    returncode, stdout, stderr = await run_desktop_command(command)
+
+    if returncode != 0:
+        message = stderr or stdout
+        if returncode in {1, 2} or "cancel" in message.lower():
+            raise HTTPException(status_code=400, detail="Folder selection cancelled")
+        raise HTTPException(status_code=500, detail=message or "Could not choose output folder")
+
+    if not stdout:
+        raise HTTPException(status_code=400, detail="Folder selection cancelled")
+
+    path = Path(stdout).expanduser().resolve()
+    if not path.exists() or not path.is_dir():
+        raise HTTPException(status_code=400, detail="Selected output folder does not exist")
+
+    return {"status": "selected", "path": str(path)}
+
+
+@app.post("/api/web-dlp/open-output-folder")
+async def open_web_dlp_output_folder(request: FolderOpenRequest | None = None) -> dict[str, str]:
+    path = resolve_web_dlp_output_dir(request.path if request else None)
+    return await open_local_folder(path, "Web-DLP output folder")
+
+
+@app.post("/api/web-dlp/jobs")
+async def create_web_dlp_job(
+    request: WebDlpJobRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    command, output_dir = build_web_dlp_command(request)
+    job_id = uuid.uuid4().hex[:12]
+    job = {
+        "id": job_id,
+        "operation": request.operation,
+        "status": "queued",
+        "command": command,
+        "command_text": shlex.join(command),
+        "url": request.url,
+        "output_path": str(output_dir),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": None,
+        "finished_at": None,
+        "return_code": None,
+        "error": None,
+        "options": request.options,
+    }
+    web_dlp_jobs[job_id] = job
+    await publish_web_dlp_event(job_id, "status", {"status": "queued"})
+    await publish_web_dlp_event(job_id, "log", {"message": f"Queued {request.operation}"})
+    background_tasks.add_task(run_web_dlp_job, job_id)
+    return {"status": "accepted", "job": public_web_dlp_job(job)}
+
+
+@app.post("/api/web-dlp/update")
+async def update_web_dlp(background_tasks: BackgroundTasks) -> dict[str, Any]:
+    job_id = uuid.uuid4().hex[:12]
+    command = build_web_dlp_update_command()
+    job = {
+        "id": job_id,
+        "operation": "update_yt_dlp",
+        "status": "queued",
+        "command": command,
+        "command_text": shlex.join(command),
+        "url": None,
+        "output_path": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": None,
+        "finished_at": None,
+        "return_code": None,
+        "error": None,
+        "options": {},
+    }
+    web_dlp_jobs[job_id] = job
+    await publish_web_dlp_event(job_id, "status", {"status": "queued"})
+    await publish_web_dlp_event(job_id, "log", {"message": "Queued yt-dlp update"})
+    background_tasks.add_task(run_web_dlp_job, job_id)
+    return {"status": "accepted", "job": public_web_dlp_job(job)}
+
+
+@app.get("/api/web-dlp/jobs/{job_id}")
+async def get_web_dlp_job(job_id: str) -> dict[str, Any]:
+    job = web_dlp_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job": public_web_dlp_job(job),
+        "events": web_dlp_event_history.get(job_id, []),
+    }
+
+
+@app.post("/api/web-dlp/jobs/{job_id}/cancel")
+async def cancel_web_dlp_job(job_id: str) -> dict[str, Any]:
+    job = web_dlp_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.get("status") in {"finished", "failed", "cancelled"}:
+        return {"status": job["status"], "job": public_web_dlp_job(job)}
+
+    job["cancel_requested"] = True
+    process = job.get("process")
+    if process is not None and process.returncode is None:
+        job["status"] = "cancelling"
+        await publish_web_dlp_event(job_id, "status", {"status": "cancelling"})
+        await publish_web_dlp_event(job_id, "log", {"message": "[CANCEL] Stopping Web-DLP job..."})
+        terminate_web_dlp_process(process)
+        asyncio.create_task(force_kill_web_dlp_process_later(job_id, process))
+        return {"status": "cancelling", "job": public_web_dlp_job(job)}
+
+    await publish_web_dlp_event(job_id, "log", {"message": "[CANCEL] Web-DLP job cancelled before start."})
+    await mark_web_dlp_job_cancelled(job_id)
+    return {"status": "cancelled", "job": public_web_dlp_job(job)}
+
+
+@app.websocket("/api/web-dlp/jobs/{job_id}/events")
+async def web_dlp_job_events(websocket: WebSocket, job_id: str):
+    await websocket.accept()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    web_dlp_event_queues.setdefault(job_id, set()).add(queue)
+    try:
+        for event in web_dlp_event_history.get(job_id, []):
+            await websocket.send_json(event)
+        while True:
+            event = await queue.get()
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        queues = web_dlp_event_queues.get(job_id)
+        if queues:
+            queues.discard(queue)
 
 
 @app.post("/api/ffmpeg")

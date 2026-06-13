@@ -19,7 +19,7 @@ http://127.0.0.1:8000/
 Проект є локальним FastAPI Gateway. Він запускає один сервер на `127.0.0.1:8000` і роздає локальні модулі:
 
 - головна сторінка Gateway;
-- Whisper;
+- Web-DLP / yt-dlp;
 - FFmpeg;
 - ElevenLabs Transcription;
 - Transcript Editor.
@@ -38,11 +38,10 @@ Python-залежності встановлюються автоматично 
 Опційні системні утиліти:
 
 - `ffmpeg` - потрібен для FFmpeg-модуля;
-- `whisper` - потрібен для локальної Whisper-транскрибації;
-- `yt-dlp` - планується для майбутнього модуля;
+- `yt-dlp` - потрібен для Web-DLP-модуля, але його можна встановити/оновити кнопкою `Update yt-dlp` у самому Gateway;
 - `ELEVENLABS_API_KEY` - потрібен для ElevenLabs-модуля.
 
-Без `ffmpeg`, `whisper` або ElevenLabs API key Gateway все одно може запуститися, але відповідні модулі або функції не зможуть виконувати реальні задачі.
+Без `ffmpeg`, `yt-dlp` або ElevenLabs API key Gateway все одно може запуститися, але відповідні модулі або функції не зможуть виконувати реальні задачі.
 
 ## Структура Після Клонування
 
@@ -453,23 +452,25 @@ sudo apt install -y ffmpeg
 ffmpeg -version
 ```
 
-## Встановлення Whisper
+## Встановлення або Оновлення yt-dlp
 
-Whisper потрібен для локального Whisper-модуля.
+`yt-dlp` потрібен для вкладки Web-DLP.
 
-У активованому virtualenv або глобально:
+Найпростіший варіант: відкрий Gateway, перейди у вкладку Web-DLP і натисни `Update yt-dlp`. Gateway виконає встановлення/оновлення у своєму virtualenv.
+
+Альтернативно можна встановити вручну в активованому virtualenv:
 
 ```bash
-pip install -U openai-whisper
+pip install -U yt-dlp
 ```
 
 Перевір:
 
 ```bash
-whisper --help
+yt-dlp --version
 ```
 
-Whisper також потребує `ffmpeg`.
+Для частини відеооперацій `yt-dlp` також використовує `ffmpeg`, тому FFmpeg бажано встановити окремо.
 
 ## Оновлення Проекту
 
@@ -499,7 +500,7 @@ git pull
 cd my_automation_gateway
 source .venv/bin/activate
 pip install -r requirements.txt
-.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --loop asyncio
 ```
 
 ## Перевірка Що Сервер Працює
@@ -520,7 +521,7 @@ http://127.0.0.1:8000/api/health
 
 ```text
 http://127.0.0.1:8000/
-http://127.0.0.1:8000/whisper_app/
+http://127.0.0.1:8000/web_dlp_app/
 http://127.0.0.1:8000/ffmpeg_app/
 http://127.0.0.1:8000/elevenlabs_app/
 http://127.0.0.1:8000/transcript_editor/
@@ -538,6 +539,7 @@ my_automation_gateway/data/
 
 ```text
 my_automation_gateway/data/ffmpeg/
+my_automation_gateway/data/web_dlp/
 my_automation_gateway/data/elevenlabs/
 my_automation_gateway/data/projects/
 ```
@@ -597,21 +599,25 @@ ffmpeg -version
 
 На Windows після додавання FFmpeg у PATH іноді треба закрити і знову відкрити PowerShell або Command Prompt.
 
-### Whisper не стартує
+### Web-DLP пише, що yt-dlp не встановлений
 
 Перевір:
 
 ```bash
-whisper --help
+yt-dlp --version
 ```
 
-Якщо команди немає, встанови:
+Якщо команди немає, відкрий вкладку Web-DLP і натисни `Update yt-dlp`, або встанови вручну:
 
 ```bash
-pip install -U openai-whisper
+pip install -U yt-dlp
 ```
 
-Також перевір `ffmpeg`.
+Також перевір `ffmpeg`, якщо завантаження потребує об'єднання відео й аудіо:
+
+```bash
+ffmpeg -version
+```
 
 ## Коротка Пам'ятка
 

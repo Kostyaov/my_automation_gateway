@@ -1,6 +1,6 @@
 # Local Automation Gateway
 
-Це локальний FastAPI-шлюз для автоматизації рутинних задач через CLI-утиліти: `whisper`, `ffmpeg` і надалі `yt-dlp` або інші інструменти. Проєкт задуманий як один центральний сервер на `127.0.0.1:8000`, який:
+Це локальний FastAPI-шлюз для автоматизації рутинних задач через CLI-утиліти: `ffmpeg`, `yt-dlp` і хмарні API на кшталт ElevenLabs. Проєкт задуманий як один центральний сервер на `127.0.0.1:8000`, який:
 
 - приймає запити з локальних HTML/JS-інтерфейсів;
 - запускає важкі CLI-процеси у фоні;
@@ -11,17 +11,26 @@
 
 ## Поточний Етап
 
-Стан на 2026-05-30: ми вже перейшли від простого прототипу до робочого локального порталу з трьома вкладками.
+Стан на 2026-06-13: основний Gateway очищений від важких ML-залежностей і сфокусований на легких CLI/API-модулях.
 
 Готово:
 
 - Працює центральний FastAPI Gateway.
 - Працює головна сторінка-каталог `/`.
 - Працює спільна тема `light/dark` через `frontends/shared/theme.css` і `frontends/shared/theme.js`.
-- Працює вкладка `Whisper` як базова форма для запуску транскрибації через `/api/whisper`.
+- Працює вкладка `Web-DLP` для запуску `yt-dlp` jobs.
 - Інтегровано `Transcript Editor`, адаптований з `Kostyaov/transkript_edit`.
 - `Transcript Editor` має локальне створення проєктів, завантаження аудіо, редагування сегментів і експорт.
 - Додано окремий модуль `ElevenLabs Transcription` для хмарної транскрибації через ElevenLabs Speech to Text API.
+- `Web-DLP` має:
+  - download video;
+  - extract audio;
+  - download subtitles;
+  - metadata/info JSON;
+  - live console через WebSocket;
+  - кнопку `Update yt-dlp`;
+  - cancel job;
+  - output folder picker/open.
 - Вкладка `FFmpeg` вже має робочий job-based інтерфейс:
   - список операцій;
   - вибір відео/аудіо/input зі сканованих папок;
@@ -36,8 +45,9 @@
 - Не треба заново інтегрувати `Transcript Editor`: він уже підключений.
 - Не треба заново будувати спільну тему: вона вже є.
 - Не треба заново робити FFmpeg job system: базова система вже працює.
-- ElevenLabs-модуль уже має базову вкладку, upload, job API, exports і інтеграцію з Transcript Editor, але ще потребує реальної перевірки з API key.
-- Поточний фокус розробки: перевірити ElevenLabs на реальному ключі/файлі, після цього розширювати FFmpeg і Whisper.
+- ElevenLabs-модуль має upload, job API, exports, live console, credits block і інтеграцію з Transcript Editor.
+- Whisper/MLX/WhisperX прототип винесений в окрему локальну git-гілку `whisper-experiment`, а не входить у чистий `main`.
+- Поточний фокус розробки: доробляти легкі Gateway-модулі `Web-DLP`, `FFmpeg`, `ElevenLabs` без ML-залежностей у базовому runtime.
 
 ## Швидкий Запуск
 
@@ -58,7 +68,7 @@ pip install -r requirements.txt
 Запустити сервер:
 
 ```bash
-.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --loop asyncio
 ```
 
 На macOS також можна запускати сервер подвійним кліком по файлу в корені workspace:
@@ -84,7 +94,7 @@ http://127.0.0.1:8000/
 Основні сторінки:
 
 - `http://127.0.0.1:8000/` - головний Gateway.
-- `http://127.0.0.1:8000/whisper_app/` - Whisper.
+- `http://127.0.0.1:8000/web_dlp_app/` - Web-DLP / yt-dlp.
 - `http://127.0.0.1:8000/ffmpeg_app/` - FFmpeg.
 - `http://127.0.0.1:8000/elevenlabs_app/` - ElevenLabs Transcription.
 - `http://127.0.0.1:8000/transcript_editor/` - Transcript Editor.
@@ -94,22 +104,25 @@ http://127.0.0.1:8000/
 Python-залежності лежать у `requirements.txt`:
 
 ```text
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
+fastapi==0.115.12
+starlette==0.46.2
+anyio==4.9.0
+pydantic==2.11.7
+httpx==0.28.1
+python-dotenv==1.1.1
+uvicorn[standard]==0.34.3
 ```
 
 Системні CLI-залежності:
 
 - `ffmpeg` - потрібен для FFmpeg-модуля.
-- `whisper` - потрібен для Whisper-модуля.
-- `yt-dlp` - поки не інтегрований у цей Gateway, але планується як майбутній модуль.
+- `yt-dlp` - потрібен для Web-DLP-модуля; його також можна встановити або оновити кнопкою `Update yt-dlp` у вкладці Web-DLP.
 - `ELEVENLABS_API_KEY` - потрібен для ElevenLabs-модуля.
 
 Перевірка:
 
 ```bash
 ffmpeg -version
-whisper --help
 yt-dlp --version
 ```
 
@@ -155,7 +168,7 @@ my_automation_gateway/
     ├── shared/
     │   ├── theme.css
     │   └── theme.js
-    ├── whisper_app/
+    ├── web_dlp_app/
     │   ├── index.html
     │   └── script.js
     ├── ffmpeg_app/
@@ -181,8 +194,10 @@ my_automation_gateway/
 - CLI workers.
 - Transcript Editor API.
 - FFmpeg file/job API.
+- Web-DLP job/update API.
 - ElevenLabs file/job API.
 - WebSocket для FFmpeg live console.
+- WebSocket для Web-DLP live console.
 - WebSocket для ElevenLabs live console.
 - StaticFiles mount для фронтендів.
 
@@ -205,6 +220,8 @@ TRANSCRIPT_DATA_DIR = ROOT / "data" / "projects"
 FFMPEG_DATA_DIR = ROOT / "data" / "ffmpeg"
 FFMPEG_INPUT_DIR = FFMPEG_DATA_DIR / "inputs"
 FFMPEG_OUTPUT_DIR = FFMPEG_DATA_DIR / "outputs"
+WEB_DLP_DATA_DIR = ROOT / "data" / "web_dlp"
+WEB_DLP_OUTPUT_DIR = WEB_DLP_DATA_DIR / "outputs"
 ELEVENLABS_DATA_DIR = ROOT / "data" / "elevenlabs"
 ELEVENLABS_INPUT_DIR = ELEVENLABS_DATA_DIR / "inputs"
 ELEVENLABS_OUTPUT_DIR = ELEVENLABS_DATA_DIR / "outputs"
@@ -215,6 +232,7 @@ ELEVENLABS_OUTPUT_DIR = ELEVENLABS_DATA_DIR / "outputs"
 - `data/projects/` - локальне сховище Transcript Editor.
 - `data/ffmpeg/inputs/` - файли, які користувач завантажує через FFmpeg UI.
 - `data/ffmpeg/outputs/` - результати FFmpeg jobs.
+- `data/web_dlp/outputs/` - результати Web-DLP / yt-dlp jobs.
 - `data/elevenlabs/inputs/` - файли, які користувач завантажує через ElevenLabs UI.
 - `data/elevenlabs/outputs/` - raw JSON і експортовані transcript-файли ElevenLabs jobs.
 
@@ -267,72 +285,69 @@ frontends/index.html
 
 - Головна сторінка-каталог.
 - Має плитки з переходами на:
-  - `/whisper_app/`
+  - `/web_dlp_app/`
   - `/ffmpeg_app/`
   - `/transcript_editor/`
 - Має перемикач теми.
 
-## Модуль: Whisper
+## Модуль: Web-DLP
 
 Файли:
 
 ```text
-frontends/whisper_app/index.html
-frontends/whisper_app/script.js
+frontends/web_dlp_app/index.html
+frontends/web_dlp_app/styles.css
+frontends/web_dlp_app/script.js
 ```
 
-Backend endpoint:
+Основні backend endpoints:
 
 ```http
-POST /api/whisper
+GET /api/web-dlp/config
+POST /api/web-dlp/jobs
+POST /api/web-dlp/update
+POST /api/web-dlp/jobs/{job_id}/cancel
+WebSocket /api/web-dlp/jobs/{job_id}/events
 ```
 
 Payload:
 
 ```json
 {
-  "file_path": "/absolute/or/relative/path/to/audio.mp3"
+  "url": "https://www.youtube.com/watch?v=...",
+  "operation": "download_video",
+  "output_path": null,
+  "options": {
+    "quality": "best",
+    "no_playlist": true,
+    "cookies_browser": ""
+  }
 }
 ```
 
-Відповідь:
+Підтримувані операції:
 
-```json
-{
-  "status": "accepted",
-  "task": "whisper"
-}
-```
+- `download_video`
+- `extract_audio`
+- `download_subtitles`
+- `metadata`
 
-Worker:
-
-```python
-run_whisper_worker(file_path)
-```
-
-Команда:
+Кнопка `Update yt-dlp` запускає:
 
 ```bash
-whisper <file_path> --threads 4 --model base
+python -m pip install -U yt-dlp
 ```
+
+у тому Python virtualenv, де запущений Gateway.
 
 Поточний стан:
 
-- Це базовий модуль.
-- Він приймає шлях до файлу.
-- Запускає Whisper у фоні через `BackgroundTasks`.
-- CLI-команда запускається через `asyncio.create_subprocess_shell`.
-- Немає live console у UI.
-- Немає історії задач.
-- Немає upload file picker.
-
-Можливі наступні кроки:
-
-- Додати upload audio/video.
-- Додати вибір model/language/output format.
-- Додати live logs як у FFmpeg.
-- Зберігати результати в `data/whisper/outputs`.
-- Зв'язати результат Whisper з Transcript Editor.
+- Приймає URL.
+- Запускає `yt-dlp` у фоні як job.
+- Показує live console через WebSocket.
+- Має cancel job.
+- Має output folder picker/open.
+- Зберігає результати в `data/web_dlp/outputs` або обрану папку.
 
 ## Модуль: Transcript Editor
 
@@ -993,16 +1008,23 @@ Health:
 GET /api/health
 ```
 
-Whisper:
-
-```http
-POST /api/whisper
-```
-
 Legacy FFmpeg endpoint:
 
 ```http
 POST /api/ffmpeg
+```
+
+Web-DLP module API:
+
+```http
+GET  /api/web-dlp/config
+POST /api/web-dlp/select-output-folder
+POST /api/web-dlp/open-output-folder
+POST /api/web-dlp/jobs
+POST /api/web-dlp/update
+GET  /api/web-dlp/jobs/{job_id}
+POST /api/web-dlp/jobs/{job_id}/cancel
+WS   /api/web-dlp/jobs/{job_id}/events
 ```
 
 Новий FFmpeg module API:
@@ -1051,24 +1073,19 @@ GET    /api/projects/{project_id}/export/{format_name}
 
 - CLI-процеси не мають блокувати FastAPI.
 - Для базових shell workers використовується `asyncio.create_subprocess_shell`.
-- Для нового FFmpeg job system використовується `asyncio.create_subprocess_exec`, бо команду зручніше і безпечніше збирати як список аргументів.
+- Для FFmpeg і Web-DLP job system використовується `asyncio.create_subprocess_exec`, бо команду зручніше і безпечніше збирати як список аргументів.
 - Для важких процесів є семафори:
 
 ```python
-whisper_semaphore = asyncio.Semaphore(1)
 ffmpeg_semaphore = asyncio.Semaphore(1)
+web_dlp_semaphore = asyncio.Semaphore(1)
+elevenlabs_semaphore = asyncio.Semaphore(1)
 ```
 
 FFmpeg-команди обмежуються через:
 
 ```text
 -threads 2
-```
-
-Whisper-команда обмежується через:
-
-```text
---threads 4
 ```
 
 Це зроблено, щоб не забирати весь CPU на Mac mini M4 або іншій локальній машині.
@@ -1144,18 +1161,18 @@ curl -s http://127.0.0.1:8000/api/ffmpeg/files
 
 Загальні:
 
+- Web-DLP, FFmpeg і ElevenLabs job history живе тільки в пам'яті.
 - Немає persistence для FFmpeg jobs після перезапуску сервера.
-- FFmpeg job history живе тільки в пам'яті.
 - Немає авторизації, бо це локальний інструмент.
 - Немає системного service/launchd файлу.
 - Немає централізованого лог-файлу на диску.
 
-Whisper:
+Web-DLP:
 
-- Немає upload picker.
-- Немає live console.
-- Немає налаштувань model/language/output format.
-- Результати не прив'язані автоматично до Transcript Editor.
+- Немає історії completed jobs у UI після перезапуску.
+- Немає batch queue для багатьох URL.
+- Немає UI для cookie file, proxy або archive-файлу.
+- Деякі сайти можуть потребувати browser cookies або свіжий `yt-dlp`.
 
 ElevenLabs:
 
@@ -1168,7 +1185,6 @@ ElevenLabs:
 FFmpeg:
 
 - Є базові операції, але немає історії completed jobs у UI.
-- Немає кнопки download/open output.
 - Немає попереднього перегляду media.
 - Немає batch processing.
 - Немає шаблонів команд.
@@ -1176,8 +1192,8 @@ FFmpeg:
 
 Transcript Editor:
 
-- Вже робочий, але його можна краще зв'язати з Whisper і FFmpeg.
-- Поки немає сценарію “транскрибувати файл і автоматично відкрити результат у Transcript Editor”.
+- Вже робочий і інтегрований з ElevenLabs.
+- Поки немає сценарію автоматичного імпорту результатів FFmpeg/Web-DLP.
 
 ## Найближчі Логічні Наступні Кроки
 
@@ -1185,10 +1201,12 @@ Transcript Editor:
 
 1. Додати реальний `ELEVENLABS_API_KEY` у `.env`, перезапустити Gateway і перевірити короткий ElevenLabs transcription job.
 2. За фактичним raw JSON ElevenLabs уточнити сегментацію в `elevenlabs_transcription.py`.
-3. Додати в FFmpeg UI історію jobs і список outputs.
-4. Додати кнопки `Download`, `Reveal path`, `Copy path` для результатів.
-5. Додати `ffprobe` endpoint і metadata panel для вибраного файлу.
-6. Додати нові FFmpeg операції:
+3. Протестувати Web-DLP на короткому URL, перевірити download video, extract audio і subtitles.
+4. Додати Web-DLP batch queue для списку URL.
+5. Додати в FFmpeg UI історію jobs і список outputs.
+6. Додати кнопки `Download`, `Reveal path`, `Copy path` для результатів.
+7. Додати `ffprobe` endpoint і metadata panel для вибраного файлу.
+8. Додати нові FFmpeg операції:
    - merge video + audio;
    - normalize audio;
    - change resolution;
@@ -1197,24 +1215,20 @@ Transcript Editor:
    - add subtitles as separate track;
    - convert audio format;
    - loudness normalization for speech.
-7. Покращити Whisper:
-   - upload file;
-   - model/language settings;
-   - live console;
-   - auto-import transcript into Transcript Editor.
-8. Додати локальний service runner для macOS.
+9. Додати локальний service runner для macOS.
 
 ## Як Починати Новий Чат
 
 Якщо доведеться продовжувати в новому чаті, достатньо дати агенту таку інструкцію:
 
 ```text
-Прочитай my_automation_gateway/README.md. Це актуальний стан проєкту. Не аналізуй весь репозиторій з нуля без потреби. Продовжуємо з поточного етапу: Gateway працює, Transcript Editor інтегрований, shared light/dark theme є, FFmpeg module має job/upload/live-console основу, ElevenLabs module доданий як окрема вкладка з upload/job/export/live-console основою. Поточний фокус - перевірити ElevenLabs з реальним API key, потім розширювати FFmpeg і Whisper.
+Прочитай my_automation_gateway/README.md. Це актуальний стан проєкту. Не аналізуй весь репозиторій з нуля без потреби. Продовжуємо з поточного етапу: Gateway працює, Transcript Editor інтегрований, shared light/dark theme є, FFmpeg module має job/upload/live-console основу, ElevenLabs module має upload/job/export/live-console/credits основу, Web-DLP module доданий для yt-dlp jobs. Whisper/MLX прототип винесений у локальну гілку whisper-experiment і не входить у чистий main.
 ```
 
 Після цього варто перевірити тільки те, що потрібно для конкретної задачі:
 
 - якщо задача про FFmpeg UI, дивитися `frontends/ffmpeg_app/*` і FFmpeg-блок у `main.py`;
+- якщо задача про Web-DLP, дивитися `frontends/web_dlp_app/*` і `/api/web-dlp` у `main.py`;
 - якщо задача про ElevenLabs, дивитися `frontends/elevenlabs_app/*`, `elevenlabs_transcription.py` і `/api/elevenlabs` у `main.py`;
 - якщо задача про стиль, дивитися `frontends/shared/theme.css`;
 - якщо задача про Transcript Editor, дивитися `frontends/transcript_editor/*`, `transcript_subtitles.py` і `/api/projects` у `main.py`;

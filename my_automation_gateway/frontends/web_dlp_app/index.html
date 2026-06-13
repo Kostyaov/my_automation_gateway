@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Web-DLP</title>
+    <link rel="stylesheet" href="/shared/theme.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260613-web-dlp" />
+    <script src="/shared/theme.js"></script>
+  </head>
+  <body>
+    <main class="module-shell">
+      <header class="module-topbar">
+        <div>
+          <p class="module-kicker">Оболонка для yt-dlp</p>
+          <h1 class="module-title">Web-DLP</h1>
+        </div>
+        <div class="header-actions">
+          <a class="button-link" href="/">Gateway</a>
+          <button class="theme-toggle" type="button" data-theme-toggle>Темна тема</button>
+        </div>
+      </header>
+
+      <section class="web-dlp-workspace">
+        <form id="web-dlp-form" class="web-dlp-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Download</p>
+              <h2>New yt-dlp job</h2>
+            </div>
+            <button id="update-ytdlp" type="button">Update yt-dlp</button>
+          </div>
+
+          <p id="runtime-status" class="status" role="status" aria-live="polite"></p>
+
+          <label class="field">
+            <span>URL</span>
+            <input id="source-url" type="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" required />
+          </label>
+
+          <label class="field">
+            <span>Operation</span>
+            <select id="operation">
+              <option value="download_video">Download video</option>
+              <option value="extract_audio">Extract audio</option>
+              <option value="download_subtitles">Download subtitles</option>
+              <option value="metadata">Metadata / info JSON</option>
+            </select>
+          </label>
+
+          <div id="video-options" class="option-grid">
+            <label class="field">
+              <span>Video quality</span>
+              <select id="quality">
+                <option value="best" selected>Best available</option>
+                <option value="1080">Up to 1080p</option>
+                <option value="720">Up to 720p</option>
+                <option value="480">Up to 480p</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="audio-options" class="option-grid hidden">
+            <label class="field">
+              <span>Audio format</span>
+              <select id="audio-format">
+                <option value="mp3" selected>MP3</option>
+                <option value="m4a">M4A</option>
+                <option value="opus">OPUS</option>
+                <option value="wav">WAV</option>
+                <option value="flac">FLAC</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="subtitle-options" class="option-grid hidden">
+            <label class="field">
+              <span>Subtitle languages</span>
+              <input id="subtitle-languages" type="text" value="uk,en,ru" />
+            </label>
+          </div>
+
+          <div class="option-grid">
+            <label class="field">
+              <span>Cookies browser</span>
+              <select id="cookies-browser">
+                <option value="" selected>None</option>
+                <option value="chrome">Chrome</option>
+                <option value="firefox">Firefox</option>
+                <option value="edge">Edge</option>
+                <option value="safari">Safari</option>
+                <option value="brave">Brave</option>
+                <option value="chromium">Chromium</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="field">
+            <span>Output folder</span>
+            <div class="path-control">
+              <input id="output-path" type="text" placeholder="Default: data/web_dlp/outputs" />
+              <button id="choose-output-folder" type="button">Choose folder</button>
+            </div>
+          </div>
+
+          <div class="check-row">
+            <label>
+              <input id="no-playlist" type="checkbox" checked />
+              <span>Download single item only</span>
+            </label>
+            <label id="auto-subs-row" class="hidden">
+              <input id="write-auto-subs" type="checkbox" checked />
+              <span>Use auto-generated subtitles if needed</span>
+            </label>
+            <label id="thumbnail-row" class="hidden">
+              <input id="write-thumbnail" type="checkbox" checked />
+              <span>Save thumbnail with metadata</span>
+            </label>
+          </div>
+
+          <button id="start-job" class="primary-button" type="submit">Start download</button>
+          <button id="cancel-job" class="ghost-button cancel-button" type="button" disabled>Cancel job</button>
+          <button id="open-output-folder" class="ghost-button folder-button" type="button">Open output folder</button>
+          <p id="form-status" class="status" role="status" aria-live="polite"></p>
+        </form>
+
+        <section class="web-dlp-panel console-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Live output</p>
+              <h2>Console</h2>
+            </div>
+            <span id="job-state" class="state-pill">idle</span>
+          </div>
+          <pre id="console-output" class="console-output" aria-live="polite"></pre>
+        </section>
+      </section>
+    </main>
+    <script src="./script.js?v=20260613-web-dlp"></script>
+  </body>
+</html>
