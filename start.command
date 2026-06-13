@@ -49,4 +49,4 @@ echo
 
 (sleep 2 && open "$APP_URL") &
 
-exec .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
+exec .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000 --loop asyncio

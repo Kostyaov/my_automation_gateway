@@ -4,8 +4,6 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 
 ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 ELEVENLABS_SUBSCRIPTION_URL = "https://api.elevenlabs.io/v1/user/subscription"
@@ -30,6 +28,8 @@ async def create_elevenlabs_transcript(
     enable_logging: bool = True,
     temperature: float | None = None,
 ) -> dict[str, Any]:
+    import httpx
+
     data: dict[str, str] = {
         "model_id": model_id,
         "tag_audio_events": bool_text(tag_audio_events),
@@ -76,6 +76,8 @@ async def create_elevenlabs_transcript(
 
 
 async def fetch_elevenlabs_subscription(api_key: str) -> dict[str, Any]:
+    import httpx
+
     headers = {"xi-api-key": api_key}
     timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
 
