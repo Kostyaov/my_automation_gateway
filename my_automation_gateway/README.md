@@ -39,7 +39,7 @@
   - `Output path`;
   - запуск job;
   - live console через WebSocket;
-  - збереження результатів у `data/ffmpeg/outputs`.
+  - збереження результатів у системну папку `Downloads` за замовчуванням.
 
 Що важливо для наступного чату:
 
@@ -160,9 +160,14 @@ my_automation_gateway/
 ├── requirements.txt
 ├── transcript_subtitles.py
 ├── data/
+│   ├── inputs/
 │   ├── ffmpeg/
-│   │   ├── inputs/
-│   │   └── outputs/
+│   │   └── outputs/        # fallback / legacy
+│   ├── web_dlp/
+│   │   └── outputs/        # fallback / legacy
+│   ├── elevenlabs/
+│   │   ├── inputs/         # legacy
+│   │   └── outputs/        # fallback / legacy
 │   └── projects/
 └── frontends/
     ├── index.html
@@ -217,25 +222,23 @@ app.mount("/", StaticFiles(directory=FRONTENDS_DIR, html=True), name="static")
 ```python
 ROOT = Path(__file__).resolve().parent
 FRONTENDS_DIR = ROOT / "frontends"
-TRANSCRIPT_DATA_DIR = ROOT / "data" / "projects"
-FFMPEG_DATA_DIR = ROOT / "data" / "ffmpeg"
-FFMPEG_INPUT_DIR = FFMPEG_DATA_DIR / "inputs"
-FFMPEG_OUTPUT_DIR = FFMPEG_DATA_DIR / "outputs"
-WEB_DLP_DATA_DIR = ROOT / "data" / "web_dlp"
-WEB_DLP_OUTPUT_DIR = WEB_DLP_DATA_DIR / "outputs"
-ELEVENLABS_DATA_DIR = ROOT / "data" / "elevenlabs"
-ELEVENLABS_INPUT_DIR = ELEVENLABS_DATA_DIR / "inputs"
-ELEVENLABS_OUTPUT_DIR = ELEVENLABS_DATA_DIR / "outputs"
+DATA_DIR = ROOT / "data"
+TRANSCRIPT_DATA_DIR = DATA_DIR / "projects"
+GLOBAL_INPUT_DIR = DATA_DIR / "inputs"
+FFMPEG_INPUT_DIR = GLOBAL_INPUT_DIR
+ELEVENLABS_INPUT_DIR = GLOBAL_INPUT_DIR
+FFMPEG_OUTPUT_DIR = default_output_dir(DATA_DIR / "ffmpeg" / "outputs")
+WEB_DLP_OUTPUT_DIR = default_output_dir(DATA_DIR / "web_dlp" / "outputs")
+ELEVENLABS_OUTPUT_DIR = default_output_dir(DATA_DIR / "elevenlabs" / "outputs")
 ```
 
 Призначення:
 
+- `data/inputs/` - спільна вхідна папка для файлів, завантажених через FFmpeg і ElevenLabs UI.
 - `data/projects/` - локальне сховище Transcript Editor.
-- `data/ffmpeg/inputs/` - файли, які користувач завантажує через FFmpeg UI.
-- `data/ffmpeg/outputs/` - результати FFmpeg jobs.
-- `data/web_dlp/outputs/` - результати Web-DLP / yt-dlp jobs.
-- `data/elevenlabs/inputs/` - файли, які користувач завантажує через ElevenLabs UI.
-- `data/elevenlabs/outputs/` - raw JSON і експортовані transcript-файли ElevenLabs jobs.
+- `~/Downloads` - стандартна output-папка для FFmpeg, Web-DLP і ElevenLabs на macOS, Windows і Linux.
+- `data/ffmpeg/inputs/` і `data/elevenlabs/inputs/` - legacy-папки, які backend ще сканує для сумісності зі старими файлами.
+- `data/*/outputs/` - fallback / legacy output-папки, якщо системна `Downloads` недоступна або там залишились старі результати.
 
 ## Shared Theme
 
@@ -355,7 +358,7 @@ python -m pip install -U yt-dlp
 - Має cancel job.
 - Має output folder picker/open.
 - За замовчуванням завантажує один елемент; повний плейлист вмикається окремим чекбоксом `Download All Playlist`.
-- Зберігає результати в `data/web_dlp/outputs` або обрану папку.
+- Зберігає результати в системну `Downloads` або обрану папку.
 
 ## Модуль: Transcript Editor
 
@@ -451,7 +454,7 @@ elevenlabs_transcription.py
 - Модуль уже доданий у Gateway як окрема вкладка `/elevenlabs_app/`.
 - Працює перевірка наявності `ELEVENLABS_API_KEY`.
 - UI працює у простому upload-only режимі: файл вибирається кнопкою `Choose file from computer`.
-- Працює upload локального файлу в `data/elevenlabs/inputs`.
+- Працює upload локального файлу в спільну папку `data/inputs`.
 - Працює створення job через `/api/elevenlabs/jobs`.
 - Працює live console через WebSocket.
 - Після успішної транскрипції backend зберігає:
@@ -532,7 +535,7 @@ remaining = character_limit - character_count
 Якщо файл вибраний з комп'ютера, Gateway спочатку завантажує його в:
 
 ```text
-data/elevenlabs/inputs/
+data/inputs/
 ```
 
 Після цього саме цей локальний файл відправляється в ElevenLabs API.
@@ -650,12 +653,12 @@ Only users from the enterprise or trial tier can use ZRM mode.
 
 Після натискання `Start transcription` виконується такий сценарій:
 
-1. Gateway завантажує вибраний файл у `data/elevenlabs/inputs/`.
+1. Gateway завантажує вибраний файл у спільну папку `data/inputs/`.
 2. Backend створює job через `/api/elevenlabs/jobs`.
 3. Файл відправляється в ElevenLabs Speech to Text API.
 4. ElevenLabs повертає transcript у JSON.
 5. Gateway перетворює відповідь ElevenLabs у внутрішній список `segments`.
-6. Gateway зберігає результати в `data/elevenlabs/outputs/`.
+6. Gateway зберігає результати в системну папку `Downloads`.
 7. Якщо увімкнено `Create Transcript Editor project`, Gateway створює проєкт у `data/projects/`.
 8. У UI з'являються кнопки для завантаження результатів і, якщо створено проєкт, кнопка переходу в Transcript Editor.
 
@@ -671,10 +674,10 @@ Only users from the enterprise or trial tier can use ZRM mode.
 Файли зберігаються тут:
 
 ```text
-data/elevenlabs/outputs/
+~/Downloads
 ```
 
-У ElevenLabs UI є кнопка `Open transcripts folder` під `Start transcription`. Вона викликає backend endpoint `POST /api/elevenlabs/open-output-folder` і відкриває цю папку в Finder на macOS.
+У ElevenLabs UI є кнопка `Open transcripts folder` під `Start transcription`. Вона викликає backend endpoint `POST /api/elevenlabs/open-output-folder` і відкриває цю папку в Finder на macOS або відповідний файловий менеджер на Windows/Linux.
 
 Якщо `Create Transcript Editor project` увімкнено, додатково створюється локальний проєкт:
 
@@ -705,14 +708,14 @@ data/projects/<project_id>/
 Файли модуля:
 
 ```text
-data/elevenlabs/inputs/
-data/elevenlabs/outputs/
+data/inputs/
+~/Downloads
 ```
 
 Scan dirs:
 
 ```python
-Path.home() / "Downloads"
+GLOBAL_INPUT_DIR
 ELEVENLABS_INPUT_DIR
 ELEVENLABS_OUTPUT_DIR
 FFMPEG_OUTPUT_DIR
@@ -746,28 +749,28 @@ frontends/ffmpeg_app/script.js
 - `Start job` запускає backend job.
 - Live console працює через WebSocket.
 - `Output path` працює:
-  - порожнє поле означає автоматичну назву в `data/ffmpeg/outputs`;
+  - порожнє поле означає автоматичну назву в системній папці `Downloads`;
   - кнопка `Choose folder` відкриває системний вибір папки і записує результат у `Output path`;
-  - просте ім'я файлу теж пишеться в `data/ffmpeg/outputs`;
+  - просте ім'я файлу теж пишеться в системну папку `Downloads`;
   - якщо `Output path` є існуючою папкою, backend збереже файл у цю папку з автоматичною назвою;
   - абсолютний шлях до файлу пише у вказану директорію.
-- Кнопка `Open output folder` відкриває папку останнього результату або стандартну `data/ffmpeg/outputs`.
+- Кнопка `Open output folder` відкриває папку останнього результату або стандартну `Downloads`.
 
 ### FFmpeg Scan Dirs
 
 Backend сканує:
 
 ```python
-Path.home() / "Downloads"
+GLOBAL_INPUT_DIR
 FFMPEG_OUTPUT_DIR
 FFMPEG_INPUT_DIR
 ```
 
 Тобто список файлів у UI береться з:
 
+- `data/inputs`
 - `~/Downloads`
-- `data/ffmpeg/outputs`
-- `data/ffmpeg/inputs`
+- legacy/fallback папок `data/ffmpeg/*`, `data/elevenlabs/*`, `data/web_dlp/outputs`
 
 ### FFmpeg Uploads
 
@@ -793,7 +796,7 @@ raw file bytes
 Файли зберігаються у:
 
 ```text
-data/ffmpeg/inputs/
+data/inputs/
 ```
 
 Якщо файл із такою назвою вже існує, backend створить унікальну назву типу:
@@ -1163,7 +1166,7 @@ curl -s http://127.0.0.1:8000/api/ffmpeg/files
 7. Вказати `Output path`, наприклад `manual_test.mp4`.
 8. Запустити job.
 9. Перевірити live console.
-10. Перевірити появу файлу в `data/ffmpeg/outputs/`.
+10. Перевірити появу файлу в системній папці `Downloads`, якщо `Output path` не був абсолютним шляхом або окремо обраною папкою.
 
 ## Поточні Обмеження
 

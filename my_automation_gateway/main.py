@@ -43,20 +43,41 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
 FRONTENDS_DIR = ROOT / "frontends"
-TRANSCRIPT_DATA_DIR = ROOT / "data" / "projects"
-FFMPEG_DATA_DIR = ROOT / "data" / "ffmpeg"
-FFMPEG_INPUT_DIR = FFMPEG_DATA_DIR / "inputs"
-FFMPEG_OUTPUT_DIR = FFMPEG_DATA_DIR / "outputs"
-WEB_DLP_DATA_DIR = ROOT / "data" / "web_dlp"
-WEB_DLP_OUTPUT_DIR = WEB_DLP_DATA_DIR / "outputs"
-ELEVENLABS_DATA_DIR = ROOT / "data" / "elevenlabs"
-ELEVENLABS_INPUT_DIR = ELEVENLABS_DATA_DIR / "inputs"
-ELEVENLABS_OUTPUT_DIR = ELEVENLABS_DATA_DIR / "outputs"
+DATA_DIR = ROOT / "data"
+TRANSCRIPT_DATA_DIR = DATA_DIR / "projects"
+GLOBAL_INPUT_DIR = DATA_DIR / "inputs"
+FFMPEG_DATA_DIR = DATA_DIR / "ffmpeg"
+FFMPEG_LEGACY_INPUT_DIR = FFMPEG_DATA_DIR / "inputs"
+FFMPEG_FALLBACK_OUTPUT_DIR = FFMPEG_DATA_DIR / "outputs"
+WEB_DLP_DATA_DIR = DATA_DIR / "web_dlp"
+WEB_DLP_FALLBACK_OUTPUT_DIR = WEB_DLP_DATA_DIR / "outputs"
+ELEVENLABS_DATA_DIR = DATA_DIR / "elevenlabs"
+ELEVENLABS_LEGACY_INPUT_DIR = ELEVENLABS_DATA_DIR / "inputs"
+ELEVENLABS_FALLBACK_OUTPUT_DIR = ELEVENLABS_DATA_DIR / "outputs"
+
+
+def default_output_dir(fallback_dir: Path) -> Path:
+    downloads_dir = Path.home() / "Downloads"
+    try:
+        downloads_dir.mkdir(parents=True, exist_ok=True)
+        if downloads_dir.exists() and downloads_dir.is_dir():
+            return downloads_dir.resolve()
+    except OSError:
+        logging.warning("Downloads folder is not available; using %s", fallback_dir)
+
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+    return fallback_dir.resolve()
+
+
+FFMPEG_INPUT_DIR = GLOBAL_INPUT_DIR
+ELEVENLABS_INPUT_DIR = GLOBAL_INPUT_DIR
+FFMPEG_OUTPUT_DIR = default_output_dir(FFMPEG_FALLBACK_OUTPUT_DIR)
+WEB_DLP_OUTPUT_DIR = default_output_dir(WEB_DLP_FALLBACK_OUTPUT_DIR)
+ELEVENLABS_OUTPUT_DIR = default_output_dir(ELEVENLABS_FALLBACK_OUTPUT_DIR)
 TRANSCRIPT_DATA_DIR.mkdir(parents=True, exist_ok=True)
-FFMPEG_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+GLOBAL_INPUT_DIR.mkdir(parents=True, exist_ok=True)
 FFMPEG_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 WEB_DLP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-ELEVENLABS_INPUT_DIR.mkdir(parents=True, exist_ok=True)
 ELEVENLABS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ffmpeg_semaphore = asyncio.Semaphore(1)
@@ -213,24 +234,40 @@ def attachment_headers(filename: str) -> dict[str, str]:
     }
 
 
+def existing_dirs(candidates: list[Path]) -> list[Path]:
+    dirs: list[Path] = []
+    seen: set[Path] = set()
+    for path in candidates:
+        if not path.exists() or not path.is_dir():
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        dirs.append(resolved)
+    return dirs
+
+
+def media_scan_dirs() -> list[Path]:
+    return existing_dirs(
+        [
+            GLOBAL_INPUT_DIR,
+            FFMPEG_OUTPUT_DIR,
+            FFMPEG_LEGACY_INPUT_DIR,
+            FFMPEG_FALLBACK_OUTPUT_DIR,
+            ELEVENLABS_LEGACY_INPUT_DIR,
+            ELEVENLABS_FALLBACK_OUTPUT_DIR,
+            WEB_DLP_FALLBACK_OUTPUT_DIR,
+        ]
+    )
+
+
 def ffmpeg_scan_dirs() -> list[Path]:
-    candidates = [
-        Path.home() / "Downloads",
-        FFMPEG_OUTPUT_DIR,
-        FFMPEG_INPUT_DIR,
-    ]
-    return [path for path in candidates if path.exists()]
+    return media_scan_dirs()
 
 
 def elevenlabs_scan_dirs() -> list[Path]:
-    candidates = [
-        Path.home() / "Downloads",
-        ELEVENLABS_INPUT_DIR,
-        ELEVENLABS_OUTPUT_DIR,
-        FFMPEG_OUTPUT_DIR,
-        FFMPEG_INPUT_DIR,
-    ]
-    return [path for path in candidates if path.exists()]
+    return media_scan_dirs()
 
 
 def media_kind(path: Path) -> str:
@@ -328,7 +365,7 @@ def resolve_media_path(value: str, field_name: str) -> Path:
     if candidate.is_absolute() and candidate.exists() and candidate.is_file():
         return candidate.resolve()
 
-    for directory in ffmpeg_scan_dirs():
+    for directory in media_scan_dirs():
         path = directory / value
         if path.exists() and path.is_file():
             return path.resolve()
@@ -1489,33 +1526,7 @@ async def elevenlabs_subscription() -> dict[str, Any]:
 
 @app.post("/api/elevenlabs/open-output-folder")
 async def open_elevenlabs_output_folder() -> dict[str, Any]:
-    ELEVENLABS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    if sys.platform == "darwin":
-        command = ["open", str(ELEVENLABS_OUTPUT_DIR)]
-    elif sys.platform.startswith("win"):
-        command = ["explorer", str(ELEVENLABS_OUTPUT_DIR)]
-    else:
-        command = ["xdg-open", str(ELEVENLABS_OUTPUT_DIR)]
-
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not open folder because {command[0]} is not available",
-        ) from exc
-
-    if process.returncode != 0:
-        message = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
-        raise HTTPException(status_code=500, detail=message or "Could not open transcripts folder")
-
-    return {"status": "opened", "path": str(ELEVENLABS_OUTPUT_DIR)}
+    return await open_local_folder(ELEVENLABS_OUTPUT_DIR, "ElevenLabs transcripts folder")
 
 
 @app.get("/api/elevenlabs/files")
