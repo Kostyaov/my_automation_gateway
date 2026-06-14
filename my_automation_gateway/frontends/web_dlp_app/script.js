@@ -36,7 +36,7 @@ function getNodes() {
     cookiesBrowser: document.querySelector("#cookies-browser"),
     outputPath: document.querySelector("#output-path"),
     chooseOutputFolder: document.querySelector("#choose-output-folder"),
-    noPlaylist: document.querySelector("#no-playlist"),
+    downloadPlaylist: document.querySelector("#download-playlist"),
     writeAutoSubs: document.querySelector("#write-auto-subs"),
     autoSubsRow: document.querySelector("#auto-subs-row"),
     writeThumbnail: document.querySelector("#write-thumbnail"),
@@ -162,7 +162,7 @@ function buildPayload() {
     url,
     operation,
     options: {
-      no_playlist: nodes.noPlaylist.checked,
+      download_playlist: nodes.downloadPlaylist.checked,
       cookies_browser: nodes.cookiesBrowser.value,
     },
   };

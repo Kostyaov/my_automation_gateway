@@ -30,7 +30,8 @@
   - live console через WebSocket;
   - кнопку `Update yt-dlp`;
   - cancel job;
-  - output folder picker/open.
+  - output folder picker/open;
+  - чекбокс `Download All Playlist`, який за замовчуванням вимкнений.
 - Вкладка `FFmpeg` вже має робочий job-based інтерфейс:
   - список операцій;
   - вибір відео/аудіо/input зі сканованих папок;
@@ -319,11 +320,17 @@ Payload:
   "output_path": null,
   "options": {
     "quality": "best",
-    "no_playlist": true,
+    "download_playlist": false,
     "cookies_browser": ""
   }
 }
 ```
+
+Логіка плейлистів:
+
+- `download_playlist: false` - стандартна поведінка інтерфейсу; Gateway додає `--no-playlist`, і yt-dlp завантажує тільки один поточний елемент.
+- `download_playlist: true` - відповідає увімкненому чекбоксу `Download All Playlist`; Gateway не додає `--no-playlist`, і yt-dlp може завантажити весь плейлист.
+- Старий параметр `no_playlist` ще підтримується backend-ом як fallback для сумісності, але новий UI його більше не відправляє.
 
 Підтримувані операції:
 
@@ -347,6 +354,7 @@ python -m pip install -U yt-dlp
 - Показує live console через WebSocket.
 - Має cancel job.
 - Має output folder picker/open.
+- За замовчуванням завантажує один елемент; повний плейлист вмикається окремим чекбоксом `Download All Playlist`.
 - Зберігає результати в `data/web_dlp/outputs` або обрану папку.
 
 ## Модуль: Transcript Editor

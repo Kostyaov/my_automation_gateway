@@ -519,7 +519,11 @@ def build_web_dlp_command(payload: WebDlpJobRequest) -> tuple[list[str], Path]:
         "%(title).200s [%(id)s].%(ext)s",
     ]
 
-    if web_dlp_option_bool(options, "no_playlist", True):
+    if "download_playlist" in options:
+        no_playlist = not web_dlp_option_bool(options, "download_playlist", False)
+    else:
+        no_playlist = web_dlp_option_bool(options, "no_playlist", True)
+    if no_playlist:
         command.append("--no-playlist")
 
     cookie_browser = web_dlp_option_str(options, "cookies_browser", "").lower()
