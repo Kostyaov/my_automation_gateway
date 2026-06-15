@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Offline Transcript Editor</title>
     <link rel="stylesheet" href="/shared/theme.css" />
-    <link rel="stylesheet" href="./styles.css?v=20260523-sidebar-help" />
+    <link rel="stylesheet" href="./styles.css?v=20260615-file-pickers" />
     <script src="/shared/theme.js"></script>
   </head>
   <body>
@@ -25,14 +25,22 @@
 
       <section id="importPanel" class="import-panel">
         <div class="field-grid">
-          <label class="file-field">
+          <div class="file-field">
             <span>Audio</span>
-            <input id="audioInput" type="file" accept="audio/*,video/mp4,video/quicktime" />
-          </label>
-          <label class="file-field">
+            <label class="file-picker">
+              <input id="audioInput" type="file" accept="audio/*,video/mp4,video/quicktime" />
+              <span>Choose audio from computer</span>
+            </label>
+            <small id="audioInputStatus" class="field-hint">Choose a local audio or video file.</small>
+          </div>
+          <div class="file-field">
             <span>Transcript</span>
-            <input id="transcriptInput" type="file" accept=".csv,.srt,.vtt,.txt,.json,text/csv,text/plain,text/vtt,application/json" />
-          </label>
+            <label class="file-picker">
+              <input id="transcriptInput" type="file" accept=".csv,.srt,.vtt,.txt,.json,text/csv,text/plain,text/vtt,application/json" />
+              <span>Choose transcript from computer</span>
+            </label>
+            <small id="transcriptInputStatus" class="field-hint">Choose a CSV, SRT, VTT, TXT, or JSON file.</small>
+          </div>
           <button id="createButton" class="primary-button" type="button">Load editor</button>
         </div>
         <div id="recentPanel" class="recent-panel hidden">
@@ -186,6 +194,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260527-replace-all" type="module"></script>
+    <script src="./app.js?v=20260615-file-pickers" type="module"></script>
   </body>
 </html>

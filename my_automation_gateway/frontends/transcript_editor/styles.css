@@ -110,16 +110,58 @@ h1 {
   color: var(--muted);
   font-size: 0.85rem;
   font-weight: 700;
+  min-width: 0;
 }
 
-.file-field input {
-  width: 100%;
+.file-field > span {
+  text-transform: uppercase;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.field-hint.error {
+  color: var(--danger);
+}
+
+.file-picker {
+  align-items: center;
+  background: var(--surface);
   border: 1px dashed var(--line-strong);
-  border-radius: 6px;
-  background: var(--control-bg);
-  min-height: 42px;
-  padding: 8px;
+  border-radius: 8px;
   color: var(--text);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  min-height: 42px;
+  min-width: 0;
+  padding: 9px 12px;
+  text-align: center;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.file-picker:hover,
+.file-picker:focus-within {
+  background: var(--panel-strong);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.file-picker input {
+  display: none;
+}
+
+.file-picker span {
+  overflow-wrap: anywhere;
 }
 
 .status-line {

@@ -33,7 +33,9 @@ const speakerPalette = [
 
 const nodes = {
   audioInput: document.querySelector("#audioInput"),
+  audioInputStatus: document.querySelector("#audioInputStatus"),
   transcriptInput: document.querySelector("#transcriptInput"),
+  transcriptInputStatus: document.querySelector("#transcriptInputStatus"),
   createButton: document.querySelector("#createButton"),
   recentPanel: document.querySelector("#recentPanel"),
   recentProjects: document.querySelector("#recentProjects"),
@@ -68,6 +70,13 @@ const nodes = {
   confirmRenameSpeakerButton: document.querySelector("#confirmRenameSpeakerButton"),
 };
 
+const importFileHints = {
+  audio: "Choose a local audio or video file.",
+  transcript: "Choose a CSV, SRT, VTT, TXT, or JSON file.",
+};
+
+nodes.audioInput.addEventListener("change", () => handleImportFileChoice("audio"));
+nodes.transcriptInput.addEventListener("change", () => handleImportFileChoice("transcript"));
 nodes.createButton.addEventListener("click", createProject);
 nodes.openRecentButton.addEventListener("click", openRecentProject);
 nodes.saveButton.addEventListener("click", saveProject);
@@ -162,10 +171,28 @@ function isEditingControl(target) {
   return ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName) || target.isContentEditable;
 }
 
+function handleImportFileChoice(role) {
+  const input = importInputForRole(role);
+  const file = input.files?.[0];
+  if (!file) {
+    setImportFileStatus(role, importFileHints[role]);
+    return;
+  }
+
+  setImportFileStatus(role, `${file.name} is ready.`);
+  setStatus(`${file.name} is ready.`);
+}
+
 async function createProject() {
   const audioFile = nodes.audioInput.files?.[0];
   const transcriptFile = nodes.transcriptInput.files?.[0];
   if (!audioFile || !transcriptFile) {
+    if (!audioFile) {
+      setImportFileStatus("audio", "Choose an audio or video file.", true);
+    }
+    if (!transcriptFile) {
+      setImportFileStatus("transcript", "Choose a transcript file.", true);
+    }
     setStatus("Choose both audio and transcript files.");
     return;
   }
@@ -243,6 +270,7 @@ function resetProject() {
   nodes.audioPlayer.load();
   nodes.audioInput.value = "";
   nodes.transcriptInput.value = "";
+  resetImportFileStatuses();
   nodes.searchInput.value = "";
   nodes.replaceInput.value = "";
   nodes.importPanel.classList.remove("hidden");
@@ -1316,6 +1344,25 @@ function setBusy(isBusy, message = "") {
   nodes.createButton.disabled = isBusy;
   nodes.createButton.textContent = isBusy ? "Loading..." : "Load editor";
   if (message) setStatus(message);
+}
+
+function importInputForRole(role) {
+  return role === "audio" ? nodes.audioInput : nodes.transcriptInput;
+}
+
+function importStatusForRole(role) {
+  return role === "audio" ? nodes.audioInputStatus : nodes.transcriptInputStatus;
+}
+
+function setImportFileStatus(role, message, isError = false) {
+  const status = importStatusForRole(role);
+  status.textContent = message;
+  status.className = isError ? "field-hint error" : "field-hint";
+}
+
+function resetImportFileStatuses() {
+  setImportFileStatus("audio", importFileHints.audio);
+  setImportFileStatus("transcript", importFileHints.transcript);
 }
 
 function setStatus(message) {
