@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 
 set "PROJECT_DIR=%~dp0my_automation_gateway"
 set "APP_URL=http://127.0.0.1:8000/"
@@ -32,15 +32,58 @@ if not errorlevel 1 (
   exit /b 0
 )
 
+if not exist "requirements.txt" (
+  echo requirements.txt was not found in:
+  echo %PROJECT_DIR%
+  pause
+  exit /b 1
+)
+
+set "PYTHON_LAUNCHER="
+py -3.12 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>nul
+if not errorlevel 1 set "PYTHON_LAUNCHER=py -3.12"
+
+if not defined PYTHON_LAUNCHER (
+  py -3.11 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)" >nul 2>nul
+  if not errorlevel 1 set "PYTHON_LAUNCHER=py -3.11"
+)
+
+if not defined PYTHON_LAUNCHER (
+  py -3.13 -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 13) else 1)" >nul 2>nul
+  if not errorlevel 1 set "PYTHON_LAUNCHER=py -3.13"
+)
+
+if not defined PYTHON_LAUNCHER (
+  python -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] <= (3, 13) else 1)" >nul 2>nul
+  if not errorlevel 1 set "PYTHON_LAUNCHER=python"
+)
+
+if not defined PYTHON_LAUNCHER (
+  echo Could not find a supported Python version.
+  echo Please install Python 3.12 or 3.11. Python 3.14 is not supported by the current dependencies yet.
+  pause
+  exit /b 1
+)
+
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] <= (3, 13) else 1)" >nul 2>nul
+  if errorlevel 1 (
+    echo Existing .venv uses an unsupported Python version. Recreating it...
+    rmdir /s /q ".venv"
+    if errorlevel 1 (
+      echo Could not remove the old .venv folder. Close programs that may use it and try again.
+      pause
+      exit /b 1
+    )
+  )
+)
+
 if not exist ".venv\Scripts\python.exe" (
   echo Creating Python virtual environment...
-  py -3 -m venv .venv
-  if errorlevel 1 (
-    python -m venv .venv
-  )
+  %PYTHON_LAUNCHER% -m venv .venv
   if errorlevel 1 (
     echo Could not create Python virtual environment.
-    echo Install Python 3.11+ and try again.
+    echo Install Python 3.12 or 3.11 and try again.
     pause
     exit /b 1
   )
@@ -54,6 +97,12 @@ if exist ".venv\.requirements-installed" (
 
 if not "%INSTALLED_HASH%"=="%REQUIREMENTS_HASH%" (
   echo Installing Python dependencies...
+  ".venv\Scripts\python.exe" -m pip install --upgrade pip setuptools wheel
+  if errorlevel 1 (
+    echo Could not update pip/build tools.
+    pause
+    exit /b 1
+  )
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt
   if errorlevel 1 (
     echo Dependency installation failed.
