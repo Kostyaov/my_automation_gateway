@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>FFmpeg Processing</title>
     <link rel="stylesheet" href="/shared/theme.css" />
-    <link rel="stylesheet" href="./styles.css?v=20260603-ffmpeg-output-tools" />
+    <link rel="stylesheet" href="./styles.css?v=20260623-ffmpeg-cancel" />
     <script src="/shared/theme.js"></script>
   </head>
   <body>
@@ -37,10 +37,15 @@
               <option value="replace_audio">Replace audio in video</option>
               <option value="extract_audio">Extract audio</option>
               <option value="cut_media">Cut media</option>
-              <option value="convert_mp4">Convert to MP4</option>
-              <option value="compress_video">Compress video</option>
-              <option value="remove_audio">Remove audio</option>
-              <option value="remux_mp4">Remux to MP4</option>
+              <option value="encode_hevc">Encode to HEVC</option>
+            </select>
+          </label>
+
+          <label id="encode-mode-field" class="field hidden">
+            <span>Encode source</span>
+            <select id="encode-mode">
+              <option value="file">Selected file</option>
+              <option value="folder">All MP4/MOV/MKV files in folder</option>
             </select>
           </label>
 
@@ -74,6 +79,15 @@
             <small id="input-upload-status" class="field-hint">Use the list or upload a local media file.</small>
           </div>
 
+          <div id="encode-folder-field" class="field hidden">
+            <span>Input folder</span>
+            <div class="path-control">
+              <input id="input-folder" type="text" placeholder="Choose a folder with MP4/MOV/MKV files" />
+              <button id="choose-input-folder" type="button">Choose folder</button>
+            </div>
+            <small class="field-hint">Batch mode processes matching files one by one and skips existing outputs.</small>
+          </div>
+
           <div id="cut-options" class="option-grid hidden">
             <label class="field">
               <span>Start time</span>
@@ -100,17 +114,8 @@
 
           <div id="encode-options" class="option-grid hidden">
             <label class="field">
-              <span>CRF</span>
-              <input id="crf" type="text" value="23" inputmode="numeric" />
-            </label>
-            <label class="field">
-              <span>Preset</span>
-              <select id="preset">
-                <option value="ultrafast">ultrafast</option>
-                <option value="veryfast">veryfast</option>
-                <option value="medium" selected>medium</option>
-                <option value="slow">slow</option>
-              </select>
+              <span>HEVC quality</span>
+              <input id="encode-quality" type="number" min="1" max="100" value="65" inputmode="numeric" />
             </label>
           </div>
 
@@ -120,7 +125,7 @@
               <input id="output-path" type="text" placeholder="Optional. Default: Downloads" />
               <button id="choose-output-folder" type="button">Choose folder</button>
             </div>
-            <small class="field-hint">Leave empty for an automatic name, choose a folder, enter a filename for the output folder, or use an absolute path.</small>
+            <small class="field-hint">Leave empty to save automatically in Downloads, choose a folder, enter a filename for the output folder, or use an absolute path.</small>
           </div>
 
           <div class="check-row">
@@ -135,6 +140,7 @@
           </div>
 
           <button id="start-job" class="primary-button" type="submit">Start job</button>
+          <button id="cancel-job" class="ghost-button cancel-button" type="button" disabled>Cancel job</button>
           <button id="open-outputs-folder" class="ghost-button folder-button" type="button">Open output folder</button>
           <p id="form-status" class="status" role="status" aria-live="polite"></p>
         </form>
@@ -151,6 +157,6 @@
         </section>
       </section>
     </main>
-    <script src="./script.js?v=20260603-ffmpeg-output-tools"></script>
+    <script src="./script.js?v=20260623-ffmpeg-cancel"></script>
   </body>
 </html>

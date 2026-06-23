@@ -153,6 +153,8 @@ VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg", ".opus"}
 SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass"}
 MEDIA_EXTENSIONS = VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | SUBTITLE_EXTENSIONS
+HEVC_SOURCE_EXTENSIONS = {".mp4", ".mov", ".mkv"}
+HEVC_OUTPUT_SUFFIX = "_m4.mp4"
 
 
 async def run_shell_command(command: str, task_name: str) -> None:
@@ -371,6 +373,21 @@ def resolve_media_path(value: str, field_name: str) -> Path:
             return path.resolve()
 
     raise HTTPException(status_code=400, detail=f"{field_name} file not found")
+
+
+def resolve_folder_path(value: str, field_name: str) -> Path:
+    if not value or not value.strip():
+        raise HTTPException(status_code=400, detail=f"{field_name} folder is required")
+
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute() and (ROOT / candidate).exists() and (ROOT / candidate).is_dir():
+        return (ROOT / candidate).resolve()
+    if not candidate.is_absolute() and (FFMPEG_INPUT_DIR / candidate).exists() and (FFMPEG_INPUT_DIR / candidate).is_dir():
+        return (FFMPEG_INPUT_DIR / candidate).resolve()
+    if candidate.is_absolute() and candidate.exists() and candidate.is_dir():
+        return candidate.resolve()
+
+    raise HTTPException(status_code=400, detail=f"{field_name} folder not found")
 
 
 def resolve_output_path(output_path: str | None, default_name: str) -> Path:
@@ -621,6 +638,14 @@ def terminate_web_dlp_process(process: asyncio.subprocess.Process, force: bool =
         pass
 
 
+def ffmpeg_process_kwargs() -> dict[str, Any]:
+    return web_dlp_process_kwargs()
+
+
+def terminate_ffmpeg_process(process: asyncio.subprocess.Process, force: bool = False) -> None:
+    terminate_web_dlp_process(process, force)
+
+
 def ffmpeg_option_bool(options: dict[str, Any], key: str, default: bool) -> bool:
     value = options.get(key, default)
     if isinstance(value, bool):
@@ -633,6 +658,145 @@ def ffmpeg_option_bool(options: dict[str, Any], key: str, default: bool) -> bool
 def ffmpeg_option_str(options: dict[str, Any], key: str, default: str) -> str:
     value = str(options.get(key, default)).strip()
     return value or default
+
+
+def ffmpeg_hevc_quality(options: dict[str, Any]) -> str:
+    value = ffmpeg_option_str(options, "quality", "65")
+    if not re.fullmatch(r"\d{1,3}", value):
+        raise HTTPException(status_code=400, detail="HEVC quality must be a number from 1 to 100")
+    number = int(value)
+    if number < 1 or number > 100:
+        raise HTTPException(status_code=400, detail="HEVC quality must be a number from 1 to 100")
+    return value
+
+
+def hevc_output_name(source: Path) -> str:
+    return f"{source.stem}{HEVC_OUTPUT_SUFFIX}"
+
+
+def is_hevc_output(source: Path) -> bool:
+    return "_m4" in source.stem.lower()
+
+
+def resolve_hevc_single_output_path(source: Path, output_path: str | None) -> Path:
+    default_name = hevc_output_name(source)
+    if output_path and output_path.strip():
+        return resolve_output_path(output_path, default_name)
+    return resolve_output_path(None, default_name)
+
+
+def resolve_hevc_output_dir(output_path: str | None, default_dir: Path) -> Path:
+    if output_path and output_path.strip():
+        candidate = Path(output_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = FFMPEG_OUTPUT_DIR / candidate
+        if candidate.exists() and candidate.is_file():
+            raise HTTPException(status_code=400, detail="Batch output path must be a folder")
+        if candidate.suffix and not candidate.exists():
+            raise HTTPException(status_code=400, detail="Batch output path must be a folder")
+    else:
+        candidate = default_dir
+
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate.resolve()
+
+
+def build_hevc_command(source: Path, output: Path, quality: str) -> list[str]:
+    return [
+        "ffmpeg",
+        "-n",
+        "-i",
+        str(source),
+        "-c:v",
+        "hevc_videotoolbox",
+        "-q:v",
+        quality,
+        "-tag:v",
+        "hvc1",
+        "-c:a",
+        "copy",
+        str(output),
+    ]
+
+
+def ffmpeg_command_item(source: Path, output: Path, command: list[str]) -> dict[str, Any]:
+    return {
+        "source_path": str(source),
+        "output_path": str(output),
+        "command": command,
+        "command_text": shlex.join(command),
+    }
+
+
+def ffmpeg_skip_item(source: Path, reason: str, output: Path | None = None) -> dict[str, str]:
+    item = {
+        "source_path": str(source),
+        "reason": reason,
+    }
+    if output is not None:
+        item["output_path"] = str(output)
+    return item
+
+
+def build_encode_hevc_plan(payload: FFmpegJobRequest) -> dict[str, Any]:
+    quality = ffmpeg_hevc_quality(payload.options)
+    batch = ffmpeg_option_bool(payload.options, "batch", False)
+    commands: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+
+    if batch:
+        source_dir = resolve_folder_path(payload.inputs.get("folder", ""), "input")
+        output_dir = resolve_hevc_output_dir(payload.output_path, FFMPEG_OUTPUT_DIR)
+        sources = sorted(
+            (
+                path
+                for path in source_dir.iterdir()
+                if path.is_file()
+                and not path.name.startswith(".")
+                and path.suffix.lower() in HEVC_SOURCE_EXTENSIONS
+            ),
+            key=lambda path: path.name.lower(),
+        )
+        if not sources:
+            raise HTTPException(status_code=400, detail="No MP4/MOV/MKV files found in selected folder")
+
+        for source in sources:
+            if is_hevc_output(source):
+                skipped.append(ffmpeg_skip_item(source, "already encoded"))
+                continue
+            output = (output_dir / hevc_output_name(source)).resolve()
+            if output.exists():
+                skipped.append(ffmpeg_skip_item(source, "output already exists", output))
+                continue
+            commands.append(ffmpeg_command_item(source, output, build_hevc_command(source, output, quality)))
+
+        return {
+            "commands": commands,
+            "output_path": output_dir,
+            "skipped": skipped,
+            "total_count": len(commands) + len(skipped),
+        }
+
+    source = resolve_media_path(payload.inputs.get("input", ""), "input")
+    if source.suffix.lower() not in HEVC_SOURCE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="HEVC encode supports MP4/MOV/MKV files")
+
+    if is_hevc_output(source):
+        output = source
+        skipped.append(ffmpeg_skip_item(source, "already encoded"))
+    else:
+        output = resolve_hevc_single_output_path(source, payload.output_path)
+    if not skipped and output.exists():
+        skipped.append(ffmpeg_skip_item(source, "output already exists", output))
+    elif not skipped:
+        commands.append(ffmpeg_command_item(source, output, build_hevc_command(source, output, quality)))
+
+    return {
+        "commands": commands,
+        "output_path": output,
+        "skipped": skipped,
+        "total_count": len(commands) + len(skipped),
+    }
 
 
 def build_replace_audio_command(payload: FFmpegJobRequest) -> tuple[list[str], Path]:
@@ -770,18 +934,44 @@ FFMPEG_OPERATIONS = {
     "replace_audio": build_replace_audio_command,
     "extract_audio": build_extract_audio_command,
     "cut_media": build_cut_media_command,
-    "convert_mp4": build_convert_mp4_command,
-    "compress_video": build_compress_video_command,
-    "remove_audio": build_remove_audio_command,
-    "remux_mp4": build_remux_mp4_command,
+    "encode_hevc": build_encode_hevc_plan,
 }
 
 
-def build_ffmpeg_command(payload: FFmpegJobRequest) -> tuple[list[str], Path]:
+def build_ffmpeg_plan(payload: FFmpegJobRequest) -> dict[str, Any]:
     builder = FFMPEG_OPERATIONS.get(payload.operation)
     if builder is None:
         raise HTTPException(status_code=400, detail=f"Unsupported operation: {payload.operation}")
-    return builder(payload)
+    result = builder(payload)
+    if isinstance(result, tuple):
+        command, output_path = result
+        source_value = (
+            payload.inputs.get("input")
+            or payload.inputs.get("video")
+            or payload.inputs.get("audio")
+            or str(output_path)
+        )
+        return {
+            "commands": [ffmpeg_command_item(Path(source_value), output_path, command)],
+            "output_path": output_path,
+            "skipped": [],
+            "total_count": 1,
+        }
+    return result
+
+
+def build_ffmpeg_command(payload: FFmpegJobRequest) -> tuple[list[str], Path]:
+    plan = build_ffmpeg_plan(payload)
+    commands = plan["commands"]
+    if len(commands) != 1:
+        raise HTTPException(status_code=400, detail="Operation does not map to a single FFmpeg command")
+    item = commands[0]
+    return item["command"], Path(item["output_path"])
+
+
+def public_ffmpeg_job(job: dict[str, Any]) -> dict[str, Any]:
+    hidden = {"command", "commands", "process"}
+    return {key: value for key, value in job.items() if key not in hidden}
 
 
 async def publish_ffmpeg_event(job_id: str, event_type: str, data: dict[str, Any]) -> None:
@@ -802,41 +992,86 @@ async def publish_ffmpeg_event(job_id: str, event_type: str, data: dict[str, Any
 
 
 async def read_ffmpeg_stream(job_id: str, stream: asyncio.StreamReader, label: str) -> None:
+    buffer = ""
     while True:
-        line = await stream.readline()
-        if not line:
+        chunk = await stream.read(4096)
+        if not chunk:
             break
-        text = line.decode(errors="replace").rstrip()
-        if text:
-            await publish_ffmpeg_event(job_id, "log", {"stream": label, "message": text})
+        buffer += chunk.decode(errors="replace")
+
+        while True:
+            newline_index = buffer.find("\n")
+            carriage_index = buffer.find("\r")
+            separators = [index for index in (newline_index, carriage_index) if index != -1]
+            if not separators:
+                break
+
+            split_index = min(separators)
+            text = buffer[:split_index].strip()
+            buffer = buffer[split_index + 1 :]
+            if text:
+                await publish_ffmpeg_event(job_id, "log", {"stream": label, "message": text})
+
+        if len(buffer) > 4096:
+            text = buffer.strip()
+            if text:
+                await publish_ffmpeg_event(job_id, "log", {"stream": label, "message": text[-4096:]})
+            buffer = ""
+
+    text = buffer.strip()
+    if text:
+        await publish_ffmpeg_event(job_id, "log", {"stream": label, "message": text})
+
+
+async def force_kill_ffmpeg_process_later(
+    job_id: str,
+    process: asyncio.subprocess.Process,
+    delay_seconds: float = 5,
+) -> None:
+    await asyncio.sleep(delay_seconds)
+    if process.returncode is None:
+        await publish_ffmpeg_event(
+            job_id,
+            "log",
+            {"message": "[CANCEL] Process did not stop gracefully; forcing shutdown."},
+        )
+        terminate_ffmpeg_process(process, force=True)
+
+
+async def mark_ffmpeg_job_cancelled(job_id: str, message: str = "FFmpeg job cancelled.") -> None:
+    job = ffmpeg_jobs[job_id]
+    job["status"] = "cancelled"
+    job["finished_at"] = datetime.now(timezone.utc).isoformat()
+    job["error"] = message
+    job["process"] = None
+    await publish_ffmpeg_event(job_id, "status", {"status": "cancelled"})
+    await publish_ffmpeg_event(job_id, "cancelled", {"status": "cancelled", "message": message})
 
 
 async def run_ffmpeg_job(job_id: str) -> None:
     job = ffmpeg_jobs[job_id]
-    command = job["command"]
+    commands = job["commands"]
+    skipped = job.get("skipped", [])
     output_path = Path(job["output_path"])
 
     async with ffmpeg_semaphore:
+        if job.get("status") == "cancelled":
+            return
+        if job.get("cancel_requested"):
+            await mark_ffmpeg_job_cancelled(job_id)
+            return
+
         job["status"] = "running"
         job["started_at"] = datetime.now(timezone.utc).isoformat()
         await publish_ffmpeg_event(job_id, "status", {"status": "running"})
-        await publish_ffmpeg_event(job_id, "log", {"message": "Running: " + shlex.join(command)})
+        for item in skipped:
+            source = Path(item["source_path"]).name
+            reason = item["reason"]
+            await publish_ffmpeg_event(job_id, "log", {"message": f"[SKIP] {source}: {reason}"})
 
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        job["pid"] = process.pid
-        await asyncio.gather(
-            read_ffmpeg_stream(job_id, process.stdout, "stdout"),
-            read_ffmpeg_stream(job_id, process.stderr, "stderr"),
-        )
-        return_code = await process.wait()
-
-        job["return_code"] = return_code
-        job["finished_at"] = datetime.now(timezone.utc).isoformat()
-        if return_code == 0:
+        if not commands:
+            job["return_code"] = 0
+            job["finished_at"] = datetime.now(timezone.utc).isoformat()
             job["status"] = "finished"
             await publish_ffmpeg_event(
                 job_id,
@@ -844,20 +1079,96 @@ async def run_ffmpeg_job(job_id: str) -> None:
                 {
                     "status": "finished",
                     "output_path": str(output_path),
-                    "message": f"Finished: {output_path.name}",
+                    "message": f"No files encoded. Skipped {len(skipped)} file(s).",
                 },
             )
-        else:
-            job["status"] = "failed"
+            return
+
+        finished_count = 0
+        for index, item in enumerate(commands, start=1):
+            if job.get("cancel_requested"):
+                await mark_ffmpeg_job_cancelled(job_id)
+                return
+
+            command = item["command"]
+            item_output = Path(item["output_path"])
             await publish_ffmpeg_event(
                 job_id,
-                "error",
+                "log",
                 {
-                    "status": "failed",
-                    "return_code": return_code,
-                    "message": f"FFmpeg failed with exit code {return_code}",
+                    "message": (
+                        f"[{index}/{len(commands)}] Running: "
+                        + shlex.join(command)
+                    )
                 },
             )
+
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    **ffmpeg_process_kwargs(),
+                )
+            except FileNotFoundError as exc:
+                job["status"] = "failed"
+                job["finished_at"] = datetime.now(timezone.utc).isoformat()
+                job["error"] = str(exc)
+                await publish_ffmpeg_event(
+                    job_id,
+                    "error",
+                    {"status": "failed", "message": f"Could not start FFmpeg job: {exc}"},
+                )
+                return
+
+            job["pid"] = process.pid
+            job["process"] = process
+            await asyncio.gather(
+                read_ffmpeg_stream(job_id, process.stdout, "stdout"),
+                read_ffmpeg_stream(job_id, process.stderr, "stderr"),
+            )
+            return_code = await process.wait()
+            job["return_code"] = return_code
+            job["process"] = None
+
+            if job.get("cancel_requested"):
+                await mark_ffmpeg_job_cancelled(job_id)
+                return
+
+            if return_code != 0:
+                job["status"] = "failed"
+                job["finished_at"] = datetime.now(timezone.utc).isoformat()
+                await publish_ffmpeg_event(
+                    job_id,
+                    "error",
+                    {
+                        "status": "failed",
+                        "return_code": return_code,
+                        "message": f"FFmpeg failed on {item_output.name} with exit code {return_code}",
+                    },
+                )
+                return
+
+            finished_count += 1
+            await publish_ffmpeg_event(
+                job_id,
+                "log",
+                {"message": f"[DONE] {item_output.name}"},
+            )
+
+        job["return_code"] = 0
+        job["finished_at"] = datetime.now(timezone.utc).isoformat()
+        job["status"] = "finished"
+        skipped_text = f", skipped {len(skipped)}" if skipped else ""
+        await publish_ffmpeg_event(
+            job_id,
+            "finished",
+            {
+                "status": "finished",
+                "output_path": str(output_path),
+                "message": f"Finished {finished_count} file(s){skipped_text}.",
+            },
+        )
 
 
 def public_web_dlp_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -1328,7 +1639,7 @@ async def start_ffmpeg(request: FFmpegRequest, background_tasks: BackgroundTasks
 
 @app.get("/api/ffmpeg/operations")
 async def list_ffmpeg_operations() -> dict[str, list[str]]:
-    return {"operations": sorted(FFMPEG_OPERATIONS)}
+    return {"operations": list(FFMPEG_OPERATIONS)}
 
 
 @app.get("/api/ffmpeg/files")
@@ -1358,6 +1669,30 @@ async def select_ffmpeg_output_folder() -> dict[str, str]:
     path = Path(stdout).expanduser().resolve()
     if not path.exists() or not path.is_dir():
         raise HTTPException(status_code=400, detail="Selected output folder does not exist")
+
+    return {"status": "selected", "path": str(path)}
+
+
+@app.post("/api/ffmpeg/select-input-folder")
+async def select_ffmpeg_input_folder() -> dict[str, str]:
+    initial_dir = Path.home() / "Movies"
+    if not initial_dir.exists() or not initial_dir.is_dir():
+        initial_dir = Path.home()
+    command = folder_picker_command("Choose folder with MP4/MOV/MKV files", initial_dir.resolve())
+    returncode, stdout, stderr = await run_desktop_command(command)
+
+    if returncode != 0:
+        message = stderr or stdout
+        if returncode in {1, 2} or "cancel" in message.lower():
+            raise HTTPException(status_code=400, detail="Folder selection cancelled")
+        raise HTTPException(status_code=500, detail=message or "Could not choose input folder")
+
+    if not stdout:
+        raise HTTPException(status_code=400, detail="Folder selection cancelled")
+
+    path = Path(stdout).expanduser().resolve()
+    if not path.exists() or not path.is_dir():
+        raise HTTPException(status_code=400, detail="Selected input folder does not exist")
 
     return {"status": "selected", "path": str(path)}
 
@@ -1406,19 +1741,27 @@ async def create_ffmpeg_job(
     request: FFmpegJobRequest,
     background_tasks: BackgroundTasks,
 ) -> dict[str, Any]:
-    command, output_path = build_ffmpeg_command(request)
+    plan = build_ffmpeg_plan(request)
+    commands = plan["commands"]
+    skipped = plan.get("skipped", [])
+    output_path = Path(plan["output_path"])
     job_id = uuid.uuid4().hex[:12]
     job = {
         "id": job_id,
         "operation": request.operation,
         "status": "queued",
-        "command": command,
-        "command_text": shlex.join(command),
+        "commands": commands,
+        "command_text": "\n".join(item["command_text"] for item in commands),
         "output_path": str(output_path),
+        "output_paths": [item["output_path"] for item in commands],
+        "skipped": skipped,
+        "total_count": plan.get("total_count", len(commands) + len(skipped)),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "started_at": None,
         "finished_at": None,
         "return_code": None,
+        "cancel_requested": False,
+        "process": None,
     }
     ffmpeg_jobs[job_id] = job
     await publish_ffmpeg_event(job_id, "status", {"status": "queued"})
@@ -1426,7 +1769,7 @@ async def create_ffmpeg_job(
     background_tasks.add_task(run_ffmpeg_job, job_id)
     return {
         "status": "accepted",
-        "job": {key: value for key, value in job.items() if key != "command"},
+        "job": public_ffmpeg_job(job),
     }
 
 
@@ -1436,9 +1779,33 @@ async def get_ffmpeg_job(job_id: str) -> dict[str, Any]:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return {
-        "job": {key: value for key, value in job.items() if key != "command"},
+        "job": public_ffmpeg_job(job),
         "events": ffmpeg_event_history.get(job_id, []),
     }
+
+
+@app.post("/api/ffmpeg/jobs/{job_id}/cancel")
+async def cancel_ffmpeg_job(job_id: str) -> dict[str, Any]:
+    job = ffmpeg_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.get("status") in {"finished", "failed", "cancelled"}:
+        return {"status": job["status"], "job": public_ffmpeg_job(job)}
+
+    job["cancel_requested"] = True
+    process = job.get("process")
+    if process is not None and process.returncode is None:
+        job["status"] = "cancelling"
+        await publish_ffmpeg_event(job_id, "status", {"status": "cancelling"})
+        await publish_ffmpeg_event(job_id, "log", {"message": "[CANCEL] Stopping FFmpeg job..."})
+        terminate_ffmpeg_process(process)
+        asyncio.create_task(force_kill_ffmpeg_process_later(job_id, process))
+        return {"status": "cancelling", "job": public_ffmpeg_job(job)}
+
+    await publish_ffmpeg_event(job_id, "log", {"message": "[CANCEL] FFmpeg job cancelled before start."})
+    await mark_ffmpeg_job_cancelled(job_id)
+    return {"status": "cancelled", "job": public_ffmpeg_job(job)}
 
 
 @app.websocket("/api/ffmpeg/jobs/{job_id}/events")

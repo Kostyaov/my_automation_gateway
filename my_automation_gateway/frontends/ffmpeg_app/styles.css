@@ -191,6 +191,16 @@
   color: var(--focus);
 }
 
+.state-pill.cancelling {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.state-pill.cancelled {
+  border-color: var(--muted);
+  color: var(--muted);
+}
+
 .state-pill.finished {
   border-color: var(--success);
   color: var(--success);
@@ -201,8 +211,17 @@
   color: var(--danger);
 }
 
-#start-job {
+#start-job,
+.cancel-button {
   width: 100%;
+}
+
+.cancel-button {
+  color: var(--danger);
+}
+
+.cancel-button:hover:not(:disabled) {
+  border-color: var(--danger);
 }
 
 .folder-button {

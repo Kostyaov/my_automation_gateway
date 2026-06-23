@@ -1,6 +1,7 @@
 let nodes = {};
 let mediaFiles = [];
 let jobSocket = null;
+let currentJobId = null;
 let lastOutputPath = "";
 
 const operationConfig = {
@@ -21,23 +22,10 @@ const operationConfig = {
     copy: true,
     description: "Cut a media file between two timestamps.",
   },
-  convert_mp4: {
-    input: "all",
-    encode: true,
-    description: "Convert a media file to H.264/AAC MP4.",
-  },
-  compress_video: {
+  encode_hevc: {
     input: "video",
     encode: true,
-    description: "Compress a video using H.264 CRF encoding.",
-  },
-  remove_audio: {
-    input: "video",
-    description: "Create a silent video copy.",
-  },
-  remux_mp4: {
-    input: "video",
-    description: "Rewrap compatible streams into an MP4 container.",
+    description: "Encode MP4/MOV/MKV to HEVC using VideoToolbox.",
   },
 };
 
@@ -82,13 +70,17 @@ function getNodes() {
     videoUploadStatus: document.querySelector("#video-upload-status"),
     audioUploadStatus: document.querySelector("#audio-upload-status"),
     inputUploadStatus: document.querySelector("#input-upload-status"),
+    encodeModeField: document.querySelector("#encode-mode-field"),
+    encodeMode: document.querySelector("#encode-mode"),
+    encodeFolderField: document.querySelector("#encode-folder-field"),
+    inputFolder: document.querySelector("#input-folder"),
+    chooseInputFolder: document.querySelector("#choose-input-folder"),
     outputPath: document.querySelector("#output-path"),
     chooseOutputFolder: document.querySelector("#choose-output-folder"),
     startTime: document.querySelector("#start-time"),
     stopTime: document.querySelector("#stop-time"),
     audioFormat: document.querySelector("#audio-format"),
-    crf: document.querySelector("#crf"),
-    preset: document.querySelector("#preset"),
+    encodeQuality: document.querySelector("#encode-quality"),
     shortest: document.querySelector("#shortest"),
     shortestRow: document.querySelector("#shortest-row"),
     copyCodecs: document.querySelector("#copy-codecs"),
@@ -98,6 +90,7 @@ function getNodes() {
     encodeOptions: document.querySelector("#encode-options"),
     refreshFiles: document.querySelector("#refresh-files"),
     startJob: document.querySelector("#start-job"),
+    cancelJob: document.querySelector("#cancel-job"),
     openOutputsFolder: document.querySelector("#open-outputs-folder"),
     formStatus: document.querySelector("#form-status"),
     consoleOutput: document.querySelector("#console-output"),
@@ -107,8 +100,11 @@ function getNodes() {
 
 function bindEvents() {
   nodes.operation.addEventListener("change", updateOperationView);
+  nodes.encodeMode.addEventListener("change", updateOperationView);
   nodes.refreshFiles.addEventListener("click", loadFiles);
   nodes.form.addEventListener("submit", startJob);
+  nodes.cancelJob.addEventListener("click", cancelCurrentJob);
+  nodes.chooseInputFolder.addEventListener("click", chooseInputFolder);
   nodes.chooseOutputFolder.addEventListener("click", chooseOutputFolder);
   nodes.openOutputsFolder.addEventListener("click", openOutputsFolder);
 
@@ -215,9 +211,12 @@ function filesByKind(kind) {
 
 function updateOperationView() {
   const config = operationConfig[nodes.operation.value] || operationConfig.replace_audio;
+  const isFolderEncode = Boolean(config.encode && nodes.encodeMode.value === "folder");
   nodes.videoField.classList.toggle("hidden", !config.video);
   nodes.audioField.classList.toggle("hidden", !config.audio);
-  nodes.inputField.classList.toggle("hidden", !config.input);
+  nodes.inputField.classList.toggle("hidden", !config.input || isFolderEncode);
+  nodes.encodeModeField.classList.toggle("hidden", !config.encode);
+  nodes.encodeFolderField.classList.toggle("hidden", !isFolderEncode);
   nodes.cutOptions.classList.toggle("hidden", !config.cut);
   nodes.extractOptions.classList.toggle("hidden", !config.extract);
   nodes.encodeOptions.classList.toggle("hidden", !config.encode);
@@ -229,7 +228,10 @@ function updateOperationView() {
 async function startJob(event) {
   event.preventDefault();
 
+  currentJobId = null;
   nodes.startJob.disabled = true;
+  nodes.cancelJob.disabled = true;
+  nodes.cancelJob.textContent = "Cancel job";
   nodes.startJob.textContent = "Preparing...";
   setJobState("queued");
   clearConsole();
@@ -237,7 +239,7 @@ async function startJob(event) {
   try {
     const payload = await buildPayload();
     if (!payload) {
-      resetStartButton();
+      resetJobButtons();
       return;
     }
 
@@ -258,16 +260,56 @@ async function startJob(event) {
     }
     const data = await response.json();
     const job = data.job;
+    currentJobId = job.id;
     appendConsole(`Job ID: ${job.id}`);
     appendConsole(`Output: ${job.output_path}`);
     lastOutputPath = job.output_path;
     nodes.startJob.textContent = "Running...";
+    nodes.cancelJob.disabled = false;
     connectJobSocket(job.id);
   } catch (error) {
     appendConsole(`[ERROR] ${error.message}`);
     setFormStatus(error.message, true);
     setJobState("failed");
-    resetStartButton();
+    resetJobButtons();
+  }
+}
+
+async function cancelCurrentJob() {
+  if (!currentJobId) {
+    setFormStatus("No active FFmpeg job to cancel.", true);
+    return;
+  }
+
+  nodes.cancelJob.disabled = true;
+  nodes.cancelJob.textContent = "Cancelling...";
+  appendConsole("[CANCEL] Cancellation requested.");
+  setFormStatus("Stopping current FFmpeg job...");
+
+  try {
+    const response = await fetch(`/api/ffmpeg/jobs/${encodeURIComponent(currentJobId)}/cancel`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(await readError(response));
+    }
+    const payload = await response.json();
+    if (payload.status === "cancelled") {
+      finishCancelledJob("FFmpeg job cancelled.");
+    } else if (payload.status === "finished" || payload.status === "failed") {
+      setJobState(payload.status);
+      setFormStatus(`FFmpeg job is already ${payload.status}.`, payload.status === "failed");
+      resetJobButtons();
+    } else {
+      setJobState("cancelling");
+    }
+  } catch (error) {
+    appendConsole(`[ERROR] ${error.message}`);
+    setFormStatus(error.message, true);
+    if (currentJobId) {
+      nodes.cancelJob.disabled = false;
+      nodes.cancelJob.textContent = "Cancel job";
+    }
   }
 }
 
@@ -293,6 +335,31 @@ async function chooseOutputFolder() {
     setFormStatus(isCancelled ? "Folder selection cancelled." : error.message, !isCancelled);
   } finally {
     nodes.chooseOutputFolder.disabled = false;
+  }
+}
+
+async function chooseInputFolder() {
+  nodes.chooseInputFolder.disabled = true;
+  setFormStatus("Choosing input folder...");
+
+  try {
+    const response = await fetch("/api/ffmpeg/select-input-folder", {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(await readError(response));
+    }
+
+    const payload = await response.json();
+    nodes.inputFolder.value = payload.path;
+    appendConsole(`[INPUT] Folder selected: ${payload.path}`);
+    setFormStatus("Input folder selected.");
+  } catch (error) {
+    const isCancelled = error.message.toLowerCase().includes("cancelled");
+    appendConsole(isCancelled ? "[INPUT] Folder selection cancelled." : `[ERROR] ${error.message}`);
+    setFormStatus(isCancelled ? "Folder selection cancelled." : error.message, !isCancelled);
+  } finally {
+    nodes.chooseInputFolder.disabled = false;
   }
 }
 
@@ -326,6 +393,7 @@ async function openOutputsFolder() {
 async function buildPayload() {
   const operation = nodes.operation.value;
   const config = operationConfig[operation];
+  const isFolderEncode = Boolean(config.encode && nodes.encodeMode.value === "folder");
   const payload = {
     operation,
     inputs: {},
@@ -342,10 +410,16 @@ async function buildPayload() {
     if (!audio) return null;
     payload.inputs.audio = audio;
   }
-  if (config.input) {
+  if (config.input && !isFolderEncode) {
     const input = await getFileChoice("input");
     if (!input) return null;
     payload.inputs.input = input;
+  }
+  if (isFolderEncode) {
+    const folder = nodes.inputFolder.value.trim();
+    if (!folder) return invalid("Choose an input folder.");
+    payload.inputs.folder = folder;
+    payload.options.batch = true;
   }
 
   const outputPath = nodes.outputPath.value.trim();
@@ -364,12 +438,11 @@ async function buildPayload() {
     payload.options.format = nodes.audioFormat.value;
   }
   if (config.encode) {
-    const crf = nodes.crf.value.trim() || (operation === "compress_video" ? "28" : "23");
-    if (!isValidCrf(crf)) {
-      return invalid("CRF must be a number from 0 to 51.");
+    const quality = nodes.encodeQuality.value.trim() || "65";
+    if (!isValidQuality(quality)) {
+      return invalid("HEVC quality must be a number from 1 to 100.");
     }
-    payload.options.crf = crf;
-    payload.options.preset = nodes.preset.value;
+    payload.options.quality = quality;
   }
 
   return payload;
@@ -454,7 +527,7 @@ function connectJobSocket(jobId) {
       }
       appendConsole(`[DONE] ${message.data.message}`);
       setFormStatus(`Finished: ${message.data.output_path || message.data.message}`);
-      resetStartButton();
+      resetJobButtons();
       loadFiles({ silent: true });
       return;
     }
@@ -462,15 +535,26 @@ function connectJobSocket(jobId) {
       setJobState("failed");
       appendConsole(`[ERROR] ${message.data.message}`);
       setFormStatus(message.data.message, true);
-      resetStartButton();
+      resetJobButtons();
+      return;
+    }
+    if (message.type === "cancelled") {
+      finishCancelledJob(message.data.message);
     }
   };
 
   jobSocket.onerror = () => {
     appendConsole("[ERROR] Console connection failed.");
     setFormStatus("Console connection failed.", true);
-    resetStartButton();
+    resetJobButtons();
   };
+}
+
+function finishCancelledJob(message) {
+  setJobState("cancelled");
+  appendConsole(`[CANCEL] ${message}`);
+  setFormStatus(message);
+  resetJobButtons();
 }
 
 function appendConsole(text) {
@@ -498,9 +582,12 @@ function setUploadStatus(role, message, isError = false) {
   status.className = isError ? "field-hint error" : "field-hint";
 }
 
-function resetStartButton() {
+function resetJobButtons() {
+  currentJobId = null;
   nodes.startJob.disabled = false;
   nodes.startJob.textContent = "Start job";
+  nodes.cancelJob.disabled = true;
+  nodes.cancelJob.textContent = "Cancel job";
 }
 
 function fileSelectForRole(role) {
@@ -521,10 +608,10 @@ function defaultUploadHint(role) {
   return "Use the list or upload a local media file.";
 }
 
-function isValidCrf(value) {
+function isValidQuality(value) {
   if (!/^\d+$/.test(value)) return false;
   const number = Number(value);
-  return number >= 0 && number <= 51;
+  return number >= 1 && number <= 100;
 }
 
 async function readError(response) {

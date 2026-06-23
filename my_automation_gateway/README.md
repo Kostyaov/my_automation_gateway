@@ -11,7 +11,7 @@
 
 ## Поточний Етап
 
-Стан на 2026-06-13: основний Gateway очищений від важких ML-залежностей і сфокусований на легких CLI/API-модулях.
+Стан на 2026-06-23: основний Gateway очищений від важких ML-залежностей і сфокусований на легких CLI/API-модулях.
 
 Готово:
 
@@ -33,11 +33,13 @@
   - output folder picker/open;
   - чекбокс `Download All Playlist`, який за замовчуванням вимкнений.
 - Вкладка `FFmpeg` вже має робочий job-based інтерфейс:
-  - список операцій;
+  - операції `Replace audio in video`, `Extract audio`, `Cut media`, `Encode to HEVC`;
   - вибір відео/аудіо/input зі сканованих папок;
   - завантаження локальних файлів через браузер;
+  - batch-режим для HEVC перекодування всіх `.mp4`, `.mov`, `.mkv` у вибраній папці;
   - `Output path`;
   - запуск job;
+  - cancel job;
   - live console через WebSocket;
   - збереження результатів у системну папку `Downloads` за замовчуванням.
 
@@ -748,7 +750,9 @@ frontends/ffmpeg_app/script.js
 - Це активний модуль розробки.
 - Інтерфейс уже працює.
 - Файли можна вибирати зі списку або завантажувати з комп'ютера.
+- Для HEVC можна обрати один файл або папку для послідовної batch-обробки.
 - `Start job` запускає backend job.
+- `Cancel job` скасовує активний або завислий FFmpeg job.
 - Live console працює через WebSocket.
 - `Output path` працює:
   - порожнє поле означає автоматичну назву в системній папці `Downloads`;
@@ -757,15 +761,14 @@ frontends/ffmpeg_app/script.js
   - якщо `Output path` є існуючою папкою, backend збереже файл у цю папку з автоматичною назвою;
   - абсолютний шлях до файлу пише у вказану директорію.
 - Кнопка `Open output folder` відкриває папку останнього результату або стандартну `Downloads`.
+- Автоматичні HEVC результати ніколи не пишуться поруч із input-файлами, якщо користувач явно не вказав таку output-папку.
 
 ### FFmpeg Scan Dirs
 
 Backend сканує:
 
 ```python
-GLOBAL_INPUT_DIR
-FFMPEG_OUTPUT_DIR
-FFMPEG_INPUT_DIR
+media_scan_dirs()
 ```
 
 Тобто список файлів у UI береться з:
@@ -824,10 +827,12 @@ Subtitle: .srt, .vtt, .ass
 GET  /api/ffmpeg/operations
 GET  /api/ffmpeg/files
 POST /api/ffmpeg/select-output-folder
+POST /api/ffmpeg/select-input-folder
 POST /api/ffmpeg/open-output-folder
 POST /api/ffmpeg/uploads
 POST /api/ffmpeg/jobs
 GET  /api/ffmpeg/jobs/{job_id}
+POST /api/ffmpeg/jobs/{job_id}/cancel
 WS   /api/ffmpeg/jobs/{job_id}/events
 ```
 
@@ -858,10 +863,14 @@ Job response:
     "status": "queued",
     "command_text": "ffmpeg ...",
     "output_path": "/absolute/path/to/output.mp4",
+    "output_paths": ["/absolute/path/to/output.mp4"],
+    "skipped": [],
+    "total_count": 1,
     "created_at": "...",
     "started_at": null,
     "finished_at": null,
-    "return_code": null
+    "return_code": null,
+    "cancel_requested": false
   }
 }
 ```
@@ -878,6 +887,7 @@ ws://127.0.0.1:8000/api/ffmpeg/jobs/{job_id}/events
 - `log`
 - `finished`
 - `error`
+- `cancelled`
 
 ### Поточні FFmpeg Операції
 
@@ -888,10 +898,7 @@ FFMPEG_OPERATIONS = {
     "replace_audio": build_replace_audio_command,
     "extract_audio": build_extract_audio_command,
     "cut_media": build_cut_media_command,
-    "convert_mp4": build_convert_mp4_command,
-    "compress_video": build_compress_video_command,
-    "remove_audio": build_remove_audio_command,
-    "remux_mp4": build_remux_mp4_command,
+    "encode_hevc": build_encode_hevc_plan,
 }
 ```
 
@@ -941,51 +948,44 @@ Options:
 - `stop_time`
 - `copy`, default `true`
 
-#### convert_mp4
+#### encode_hevc
 
-Призначення: конвертація в H.264/AAC MP4.
+Призначення: перекодувати відео у легший HEVC/H.265 MP4 через Apple VideoToolbox.
 
 Inputs:
 
-- `input`
+- single file mode: `input`
+- batch folder mode: `folder`
 
 Options:
 
-- `crf`, default `23`
-- `preset`, default `medium`
+- `quality`, default `65`
+- `batch`, default `false`
 
-#### compress_video
+Підтримувані input-розширення:
 
-Призначення: стиснення відео через H.264 CRF.
+```text
+.mp4, .mov, .mkv
+```
 
-Inputs:
+Команда по суті:
 
-- `input`
+```bash
+ffmpeg -n -i <input> -c:v hevc_videotoolbox -q:v 65 -tag:v hvc1 -c:a copy <output>_m4.mp4
+```
 
-Options:
+Output rules:
 
-- `crf`, default `28`
-- `preset`, default `slow`
-
-#### remove_audio
-
-Призначення: створити копію відео без аудіо.
-
-Inputs:
-
-- `input`
-
-#### remux_mp4
-
-Призначення: перепакувати compatible streams у MP4 без перекодування.
-
-Inputs:
-
-- `input`
+- output suffix: `_m4.mp4`;
+- якщо input-файл уже має `_m4` у назві, backend його пропускає;
+- якщо output-файл уже існує, backend його пропускає;
+- якщо `Output path` порожній, single і batch результати пишуться в системну папку `Downloads`;
+- якщо `Output path` є папкою, всі результати пишуться в цю папку;
+- batch виконує файли послідовно в межах одного FFmpeg job.
 
 ### Як Додавати Нову FFmpeg Операцію
 
-1. У `main.py` створити builder-функцію:
+1. У `main.py` створити builder-функцію для одного FFmpeg command:
 
 ```python
 def build_new_operation_command(payload: FFmpegJobRequest) -> tuple[list[str], Path]:
@@ -995,7 +995,20 @@ def build_new_operation_command(payload: FFmpegJobRequest) -> tuple[list[str], P
     return command, output
 ```
 
-2. Додати її в `FFMPEG_OPERATIONS`.
+Для batch або multi-command операцій builder може повертати plan:
+
+```python
+{
+    "commands": [
+        ffmpeg_command_item(source, output, command),
+    ],
+    "output_path": output_dir,
+    "skipped": [],
+    "total_count": 1,
+}
+```
+
+2. Додати builder у `FFMPEG_OPERATIONS`.
 
 3. Додати option у `frontends/ffmpeg_app/index.html`.
 
@@ -1011,7 +1024,9 @@ new_operation: {
 
 5. Якщо потрібні нові поля UI, додати їх в HTML, `getNodes()`, `updateOperationView()` і `buildPayload()`.
 
-Головний принцип: не переписувати FFmpeg-модуль під кожну команду. Нові команди мають додаватися через registry + builder + маленький UI config.
+6. Якщо операція довга або batch-орієнтована, переконатися, що вона працює з існуючим `Cancel job`: job має мати `process`, `cancel_requested` і не запускати наступні команди після cancel.
+
+Головний принцип: не переписувати FFmpeg-модуль під кожну команду. Нові команди мають додаватися через registry + builder/plan + маленький UI config.
 
 ## API Summary
 
@@ -1046,10 +1061,12 @@ WS   /api/web-dlp/jobs/{job_id}/events
 GET  /api/ffmpeg/operations
 GET  /api/ffmpeg/files
 POST /api/ffmpeg/select-output-folder
+POST /api/ffmpeg/select-input-folder
 POST /api/ffmpeg/open-output-folder
 POST /api/ffmpeg/uploads
 POST /api/ffmpeg/jobs
 GET  /api/ffmpeg/jobs/{job_id}
+POST /api/ffmpeg/jobs/{job_id}/cancel
 WS   /api/ffmpeg/jobs/{job_id}/events
 ```
 
@@ -1095,13 +1112,13 @@ web_dlp_semaphore = asyncio.Semaphore(1)
 elevenlabs_semaphore = asyncio.Semaphore(1)
 ```
 
-FFmpeg-команди обмежуються через:
+Частина CPU-bound FFmpeg-команд обмежується через:
 
 ```text
 -threads 2
 ```
 
-Це зроблено, щоб не забирати весь CPU на Mac mini M4 або іншій локальній машині.
+Це зроблено, щоб не забирати весь CPU на локальній машині. HEVC-операція `encode_hevc` використовує `hevc_videotoolbox` і не додає `-threads 2`, бо має йти через Apple VideoToolbox / Media Engine.
 
 ## Важливі Поточні Файли Даних
 
@@ -1157,18 +1174,28 @@ curl -s http://127.0.0.1:8000/api/ffmpeg/operations
 curl -s http://127.0.0.1:8000/api/ffmpeg/files
 ```
 
+Очікуваний список FFmpeg operations:
+
+```json
+["replace_audio", "extract_audio", "cut_media", "encode_hevc"]
+```
+
 Браузерна перевірка:
 
 1. Відкрити `/`.
 2. Перевірити перемикач теми.
 3. Перейти в `/ffmpeg_app/`.
-4. Переконатися, що списки файлів заповнені.
-5. Натиснути `Start job` без файлів і перевірити warning.
-6. Вибрати video + audio.
-7. Вказати `Output path`, наприклад `manual_test.mp4`.
-8. Запустити job.
-9. Перевірити live console.
-10. Перевірити появу файлу в системній папці `Downloads`, якщо `Output path` не був абсолютним шляхом або окремо обраною папкою.
+4. Переконатися, що в `Operation` є тільки:
+   - `Replace audio in video`;
+   - `Extract audio`;
+   - `Cut media`;
+   - `Encode to HEVC`.
+5. Переконатися, що `Cancel job` видима і disabled до старту job.
+6. Натиснути `Start job` без файлів і перевірити warning.
+7. Для `Replace audio in video` вибрати video + audio, запустити job і перевірити live console.
+8. Для `Encode to HEVC` залишити `Output path` порожнім, запустити single-file job і перевірити результат у системній папці `Downloads` з суфіксом `_m4.mp4`.
+9. Для HEVC batch mode вибрати `All MP4/MOV/MKV files in folder`, обрати input folder, залишити `Output path` порожнім і перевірити, що результати пишуться в `Downloads`, а не поруч із input-файлами.
+10. Запустити довший FFmpeg job, натиснути `Cancel job` і перевірити статуси `cancelling` -> `cancelled`.
 
 ## Поточні Обмеження
 
