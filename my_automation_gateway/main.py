@@ -13,6 +13,7 @@ import sys
 import unicodedata
 import uuid
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote
@@ -672,6 +673,54 @@ def ffmpeg_hevc_quality(options: dict[str, Any]) -> str:
     return value
 
 
+def hevc_crf_from_quality(quality: str) -> str:
+    number = int(quality)
+    crf = round(35 - ((number - 1) * 17 / 99))
+    return str(max(18, min(35, crf)))
+
+
+@lru_cache(maxsize=1)
+def available_ffmpeg_encoders() -> set[str]:
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return set()
+
+    encoders: set[str] = set()
+    for line in f"{result.stdout}\n{result.stderr}".splitlines():
+        columns = line.split()
+        if len(columns) >= 2 and columns[0].startswith(("V", "A", "S")):
+            encoders.add(columns[1])
+    return encoders
+
+
+def select_hevc_encoder() -> str:
+    encoders = available_ffmpeg_encoders()
+    if sys.platform == "darwin":
+        preferred = ["hevc_videotoolbox", "hevc_nvenc", "libx265"]
+    else:
+        preferred = ["hevc_nvenc", "libx265", "hevc_videotoolbox"]
+
+    for encoder in preferred:
+        if encoder in encoders:
+            return encoder
+
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "No HEVC encoder found in FFmpeg. Install an FFmpeg build with "
+            "libx265, NVIDIA NVENC (hevc_nvenc), or Apple VideoToolbox "
+            "(hevc_videotoolbox)."
+        ),
+    )
+
+
 def hevc_output_name(source: Path) -> str:
     return f"{source.stem}{HEVC_OUTPUT_SUFFIX}"
 
@@ -704,21 +753,18 @@ def resolve_hevc_output_dir(output_path: str | None, default_dir: Path) -> Path:
 
 
 def build_hevc_command(source: Path, output: Path, quality: str) -> list[str]:
-    return [
-        "ffmpeg",
-        "-n",
-        "-i",
-        str(source),
-        "-c:v",
-        "hevc_videotoolbox",
-        "-q:v",
-        quality,
-        "-tag:v",
-        "hvc1",
-        "-c:a",
-        "copy",
-        str(output),
-    ]
+    encoder = select_hevc_encoder()
+    command = ["ffmpeg", "-n", "-i", str(source), "-c:v", encoder]
+
+    if encoder == "hevc_videotoolbox":
+        command.extend(["-q:v", quality])
+    elif encoder == "hevc_nvenc":
+        command.extend(["-cq:v", hevc_crf_from_quality(quality), "-b:v", "0"])
+    else:
+        command.extend(["-crf", hevc_crf_from_quality(quality), "-preset", "medium"])
+
+    command.extend(["-tag:v", "hvc1", "-c:a", "copy", str(output)])
+    return command
 
 
 def ffmpeg_command_item(source: Path, output: Path, command: list[str]) -> dict[str, Any]:

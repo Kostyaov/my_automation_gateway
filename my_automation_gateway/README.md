@@ -966,7 +966,7 @@ Options:
 
 #### encode_hevc
 
-Призначення: перекодувати відео у легший HEVC/H.265 MP4 через Apple VideoToolbox.
+Призначення: перекодувати відео у легший HEVC/H.265 MP4 через доступний локальний енкодер FFmpeg.
 
 Inputs:
 
@@ -984,10 +984,16 @@ Options:
 .mp4, .mov, .mkv
 ```
 
+Backend автоматично обирає HEVC encoder з локального FFmpeg:
+
+- macOS: `hevc_videotoolbox`, якщо доступний;
+- Windows/Linux з NVIDIA: `hevc_nvenc`, якщо доступний;
+- fallback: `libx265`, якщо доступний.
+
 Команда по суті:
 
 ```bash
-ffmpeg -n -i <input> -c:v hevc_videotoolbox -q:v 65 -tag:v hvc1 -c:a copy <output>_m4.mp4
+ffmpeg -n -i <input> -c:v <auto-selected-hevc-encoder> <quality-options> -tag:v hvc1 -c:a copy <output>_m4.mp4
 ```
 
 Output rules:
@@ -1134,7 +1140,7 @@ elevenlabs_semaphore = asyncio.Semaphore(1)
 -threads 2
 ```
 
-Це зроблено, щоб не забирати весь CPU на локальній машині. HEVC-операція `encode_hevc` використовує `hevc_videotoolbox` і не додає `-threads 2`, бо має йти через Apple VideoToolbox / Media Engine.
+Це зроблено, щоб не забирати весь CPU на локальній машині. HEVC-операція `encode_hevc` не додає `-threads 2`: backend автоматично обирає доступний HEVC encoder (`hevc_videotoolbox`, `hevc_nvenc` або `libx265`).
 
 ## Важливі Поточні Файли Даних
 

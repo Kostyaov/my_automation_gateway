@@ -25,7 +25,7 @@ const operationConfig = {
   encode_hevc: {
     input: "video",
     encode: true,
-    description: "Encode MP4/MOV/MKV to HEVC using VideoToolbox.",
+    description: "Encode MP4/MOV/MKV to HEVC.",
   },
 };
 
