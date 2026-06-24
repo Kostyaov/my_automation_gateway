@@ -340,12 +340,12 @@ async def photo_preview_config() -> dict[str, Any]:
     return {
         "has_pillow": pillow_available(),
         "preview_folder_name": PREVIEW_FOLDER_NAME,
-        "supported_formats": ["webp", "jpeg"],
+        "supported_formats": ["jpeg", "webp"],
         "defaults": {
-            "output_format": "webp",
+            "output_format": "jpeg",
             "max_side": 1920,
-            "quality": 80,
-            "name_filter": "all",
+            "quality": 90,
+            "name_filter": "camera",
             "skip_unchanged": True,
             "workers": 4,
         },

@@ -196,7 +196,7 @@ function buildPayload() {
     return invalid("Long side must be from 320 to 10000.");
   }
 
-  const quality = parseNumber(nodes.quality.value, 80);
+  const quality = parseNumber(nodes.quality.value, 90);
   if (quality < 1 || quality > 100) {
     return invalid("Quality must be from 1 to 100.");
   }

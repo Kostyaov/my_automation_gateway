@@ -23,10 +23,10 @@ class PhotoPreviewError(ValueError):
 @dataclass(frozen=True)
 class PreviewOptions:
     source_dir: Path
-    output_format: str = "webp"
+    output_format: str = "jpeg"
     max_side: int = 1920
-    quality: int = 80
-    name_filter: str = "all"
+    quality: int = 90
+    name_filter: str = "camera"
     skip_unchanged: bool = True
     dry_run: bool = False
     workers: int = 4
