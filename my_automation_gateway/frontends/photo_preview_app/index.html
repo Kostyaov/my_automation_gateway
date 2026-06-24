@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Photo Preview</title>
+    <link rel="stylesheet" href="/shared/theme.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260624-photo-preview" />
+    <script src="/shared/theme.js"></script>
+  </head>
+  <body>
+    <main class="module-shell">
+      <header class="module-topbar">
+        <div>
+          <p class="module-kicker">Local photo archive</p>
+          <h1 class="module-title">Photo Preview</h1>
+        </div>
+        <div class="header-actions">
+          <a class="button-link" href="/">Gateway</a>
+          <button class="theme-toggle" type="button" data-theme-toggle>Темна тема</button>
+        </div>
+      </header>
+
+      <section class="photo-workspace">
+        <form id="photo-form" class="photo-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Archive</p>
+              <h2>Preview job</h2>
+            </div>
+            <span id="dependency-state" class="state-pill">checking</span>
+          </div>
+
+          <div class="field">
+            <span>Source folder</span>
+            <div class="path-control">
+              <input id="source-path" type="text" placeholder="/Volumes/Photo Archive" />
+              <button id="choose-source-folder" type="button">Choose folder</button>
+            </div>
+            <small id="source-hint" class="field-hint">PREVIEW folders are skipped while scanning.</small>
+          </div>
+
+          <div class="option-grid">
+            <label class="field">
+              <span>Format</span>
+              <select id="output-format">
+                <option value="webp">WebP</option>
+                <option value="jpeg">JPEG</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Name filter</span>
+              <select id="name-filter">
+                <option value="all">All JPEG files</option>
+                <option value="camera">IMG_ / DSC_ only</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="option-grid">
+            <label class="field">
+              <span>Long side</span>
+              <input id="max-side" type="number" min="320" max="10000" step="10" value="1920" inputmode="numeric" />
+            </label>
+
+            <label class="field">
+              <span>Quality</span>
+              <input id="quality" type="number" min="1" max="100" value="80" inputmode="numeric" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Workers</span>
+            <input id="workers" type="number" min="1" max="16" value="4" inputmode="numeric" />
+          </label>
+
+          <div class="check-row">
+            <label>
+              <input id="skip-unchanged" type="checkbox" checked />
+              <span>Skip unchanged originals</span>
+            </label>
+            <label>
+              <input id="dry-run" type="checkbox" />
+              <span>Check only, do not create files</span>
+            </label>
+          </div>
+
+          <button id="start-job" class="primary-button" type="submit">Start job</button>
+          <button id="cancel-job" class="ghost-button cancel-button" type="button" disabled>Cancel job</button>
+          <button id="open-source-folder" class="ghost-button folder-button" type="button">Open source folder</button>
+          <p id="form-status" class="status" role="status" aria-live="polite"></p>
+        </form>
+
+        <section class="photo-panel console-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Live output</p>
+              <h2>Console</h2>
+            </div>
+            <span id="job-state" class="state-pill">idle</span>
+          </div>
+
+          <div class="stats-grid" aria-live="polite">
+            <div>
+              <span>Found</span>
+              <strong id="stat-found">0</strong>
+            </div>
+            <div>
+              <span>Created</span>
+              <strong id="stat-created">0</strong>
+            </div>
+            <div>
+              <span>Skipped</span>
+              <strong id="stat-skipped">0</strong>
+            </div>
+            <div>
+              <span>Failed</span>
+              <strong id="stat-failed">0</strong>
+            </div>
+            <div>
+              <span>Original</span>
+              <strong id="stat-original">0 B</strong>
+            </div>
+            <div>
+              <span>Preview</span>
+              <strong id="stat-preview">0 B</strong>
+            </div>
+          </div>
+
+          <pre id="console-output" class="console-output" aria-live="polite"></pre>
+        </section>
+      </section>
+    </main>
+    <script src="./script.js?v=20260624-photo-preview"></script>
+  </body>
+</html>

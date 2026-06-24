@@ -11,7 +11,7 @@
 
 ## Поточний Етап
 
-Стан на 2026-06-23: основний Gateway очищений від важких ML-залежностей і сфокусований на легких CLI/API-модулях.
+Стан на 2026-06-24: основний Gateway очищений від важких ML-залежностей і сфокусований на легких CLI/API-модулях.
 
 Готово:
 
@@ -42,6 +42,13 @@
   - cancel job;
   - live console через WebSocket;
   - збереження результатів у системну папку `Downloads` за замовчуванням.
+- Додано модуль `Photo Preview` для локального фотоархіву:
+  - рекурсивно сканує вибрану папку;
+  - ігнорує вкладені папки `PREVIEW`;
+  - створює `PREVIEW` поруч з оригіналами;
+  - генерує WebP або JPEG прев'ю;
+  - пропускає незмінені оригінали через manifest;
+  - має режим перевірки без створення файлів, live console, progress stats і cancel job.
 
 Що важливо для наступного чату:
 
@@ -101,6 +108,7 @@ http://127.0.0.1:8000/
 - `http://127.0.0.1:8000/` - головний Gateway.
 - `http://127.0.0.1:8000/web_dlp_app/` - Web-DLP / yt-dlp.
 - `http://127.0.0.1:8000/ffmpeg_app/` - FFmpeg.
+- `http://127.0.0.1:8000/photo_preview_app/` - Photo Preview.
 - `http://127.0.0.1:8000/elevenlabs_app/` - ElevenLabs Transcription.
 - `http://127.0.0.1:8000/transcript_editor/` - Transcript Editor.
 
@@ -116,6 +124,7 @@ pydantic==2.11.7
 httpx==0.28.1
 python-dotenv==1.1.1
 uvicorn[standard]==0.34.3
+Pillow==11.2.1
 ```
 
 Системні CLI-залежності:
@@ -123,6 +132,7 @@ uvicorn[standard]==0.34.3
 - `ffmpeg` - потрібен для FFmpeg-модуля.
 - `yt-dlp` - потрібен для Web-DLP-модуля; його також можна встановити або оновити кнопкою `Update yt-dlp` у вкладці Web-DLP.
 - `ELEVENLABS_API_KEY` - потрібен для ElevenLabs-модуля.
+- `Pillow` - Python-залежність для Photo Preview; встановлюється через `requirements.txt`.
 
 Перевірка:
 
@@ -185,6 +195,10 @@ my_automation_gateway/
     │   ├── index.html
     │   ├── styles.css
     │   └── script.js
+    ├── photo_preview_app/
+    │   ├── index.html
+    │   ├── styles.css
+    │   └── script.js
     ├── elevenlabs_app/
     │   ├── index.html
     │   ├── styles.css
@@ -206,9 +220,11 @@ my_automation_gateway/
 - FFmpeg file/job API.
 - Web-DLP job/update API.
 - ElevenLabs file/job API.
+- Photo Preview job API.
 - WebSocket для FFmpeg live console.
 - WebSocket для Web-DLP live console.
 - WebSocket для ElevenLabs live console.
+- WebSocket для Photo Preview live console.
 - StaticFiles mount для фронтендів.
 
 Статика монтується в самому кінці файлу:

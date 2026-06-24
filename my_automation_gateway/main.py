@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from elevenlabs_transcription import build_segments_from_elevenlabs
 from elevenlabs_transcription import create_elevenlabs_transcript
 from elevenlabs_transcription import fetch_elevenlabs_subscription
+from modules.photo_preview.router import router as photo_preview_router
 from elevenlabs_transcription import DEFAULT_MODEL_ID, ElevenLabsTranscriptionError
 from transcript_subtitles import export_csv, export_srt, export_txt, export_vtt
 from transcript_subtitles import parse_transcript, renumber_segments
@@ -38,6 +39,7 @@ logging.basicConfig(
 )
 
 app = FastAPI(title="Local Automation Gateway")
+app.include_router(photo_preview_router, prefix="/api/photo-preview")
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
