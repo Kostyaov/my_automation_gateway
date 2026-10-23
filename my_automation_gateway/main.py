@@ -624,6 +624,13 @@ def build_web_dlp_command(payload: WebDlpJobRequest) -> tuple[list[str], Path]:
         if web_dlp_option_bool(options, "write_thumbnail", True):
             command.append("--write-thumbnail")
 
+    if ukrainian_audio and not no_playlist:
+        if importlib.util.find_spec("yt_dlp") is None:
+            raise HTTPException(status_code=400, detail="Для українського плейліста спочатку натисніть Update yt-dlp.")
+        base = yt_dlp_base_command()
+        command = [sys.executable, str(ROOT / "web_dlp_playlist.py"), *command[len(base):]]
+        command.append("--yes-playlist")
+
     command.append(url)
     return command, output_dir
 
@@ -1262,6 +1269,8 @@ async def read_web_dlp_stream(job_id: str, stream: asyncio.StreamReader, label: 
             break
         text = line.decode(errors="replace").rstrip()
         if text:
+            if text.startswith("[SUMMARY] "):
+                web_dlp_jobs[job_id]["playlist_summary"] = text.removeprefix("[SUMMARY] ")
             if "Requested format is not available" in text and web_dlp_option_bool(
                 web_dlp_jobs[job_id].get("options", {}), "ukrainian_audio", False
             ):
@@ -1355,12 +1364,12 @@ async def run_web_dlp_job(job_id: str) -> None:
                 {
                     "status": "finished",
                     "output_path": job.get("output_path"),
-                    "message": f"Finished: {job['operation']}",
+                    "message": job.get("playlist_summary") or f"Finished: {job['operation']}",
                 },
             )
         else:
             job["status"] = "failed"
-            job["error"] = job.get("selection_error") or f"Web-DLP failed with exit code {return_code}"
+            job["error"] = job.get("playlist_summary") or job.get("selection_error") or f"Web-DLP failed with exit code {return_code}"
             await publish_web_dlp_event(
                 job_id,
                 "error",

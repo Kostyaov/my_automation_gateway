@@ -64,6 +64,19 @@
   text-transform: uppercase;
 }
 
+.field-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+#ukrainian-audio-options {
+  display: grid;
+  gap: 7px;
+}
+
 .option-grid {
   display: grid;
   gap: 12px;
