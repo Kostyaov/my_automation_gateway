@@ -565,6 +565,7 @@ def build_web_dlp_command(payload: WebDlpJobRequest) -> tuple[list[str], Path]:
     url = validate_web_dlp_url(payload.url)
     output_dir = resolve_web_dlp_output_dir(payload.output_path)
     options = payload.options
+    ukrainian_audio = operation in {"download_video", "extract_audio"} and web_dlp_option_bool(options, "ukrainian_audio", False)
     command = [
         *yt_dlp_base_command(),
         "--newline",
@@ -573,7 +574,7 @@ def build_web_dlp_command(payload: WebDlpJobRequest) -> tuple[list[str], Path]:
         "-P",
         str(output_dir),
         "-o",
-        "%(title).200s [%(id)s].%(ext)s",
+        "%(title).200s [%(id)s]" + (" [uk]" if ukrainian_audio else "") + ".%(ext)s",
     ]
 
     if "download_playlist" in options:
@@ -589,16 +590,29 @@ def build_web_dlp_command(payload: WebDlpJobRequest) -> tuple[list[str], Path]:
     if cookie_browser:
         command.extend(["--cookies-from-browser", cookie_browser])
 
+    # Select by language in the same extraction: YouTube format IDs are unstable.
+    # Do not use bv*: it may already contain original-language audio.
+    uk_filter = '[language~="(?i)^uk(?:[-_]|$)"]'
+    if ukrainian_audio:
+        node = shutil.which("node")
+        if node:
+            command.extend(["--js-runtimes", f"node:{node}"])
+
     if operation == "download_video":
         quality = web_dlp_option_str(options, "quality", "best")
         format_selector = WEB_DLP_QUALITY_FORMATS.get(quality)
         if not format_selector:
             raise HTTPException(status_code=400, detail="Unsupported video quality")
+        if ukrainian_audio:
+            height_filter = "" if quality == "best" else f"[height<={quality}]"
+            format_selector = f"bv{height_filter}+ba{uk_filter}/b{height_filter}{uk_filter}"
         command.extend(["-f", format_selector, "--merge-output-format", "mp4"])
     elif operation == "extract_audio":
         audio_format = web_dlp_option_str(options, "audio_format", "mp3").lower()
         if audio_format not in WEB_DLP_AUDIO_FORMATS:
             raise HTTPException(status_code=400, detail="Unsupported audio format")
+        if ukrainian_audio:
+            command.extend(["-f", f"ba{uk_filter}/b{uk_filter}"])
         command.extend(["-x", "--audio-format", audio_format, "--audio-quality", "0"])
     elif operation == "download_subtitles":
         language = web_dlp_option_str(options, "subtitle_languages", "uk,en,ru")
@@ -615,7 +629,7 @@ def build_web_dlp_command(payload: WebDlpJobRequest) -> tuple[list[str], Path]:
 
 
 def build_web_dlp_update_command() -> list[str]:
-    return [sys.executable, "-m", "pip", "install", "-U", "yt-dlp"]
+    return [sys.executable, "-m", "pip", "install", "-U", "yt-dlp[default]"]
 
 
 def web_dlp_process_kwargs() -> dict[str, Any]:
@@ -1248,6 +1262,14 @@ async def read_web_dlp_stream(job_id: str, stream: asyncio.StreamReader, label: 
             break
         text = line.decode(errors="replace").rstrip()
         if text:
+            if "Requested format is not available" in text and web_dlp_option_bool(
+                web_dlp_jobs[job_id].get("options", {}), "ukrainian_audio", False
+            ):
+                web_dlp_jobs[job_id]["selection_error"] = (
+                    "Не знайдено доступного формату з українською аудіодоріжкою "
+                    "та обраною якістю. Перевірте наявність озвучки, оновіть yt-dlp "
+                    "або змініть якість. Іншу мову автоматично не вибрано."
+                )
             await publish_web_dlp_event(job_id, "log", {"stream": label, "message": text})
 
 
@@ -1338,7 +1360,7 @@ async def run_web_dlp_job(job_id: str) -> None:
             )
         else:
             job["status"] = "failed"
-            job["error"] = f"Web-DLP failed with exit code {return_code}"
+            job["error"] = job.get("selection_error") or f"Web-DLP failed with exit code {return_code}"
             await publish_web_dlp_event(
                 job_id,
                 "error",
@@ -1657,9 +1679,15 @@ async def web_dlp_job_events(websocket: WebSocket, job_id: str):
     try:
         for event in web_dlp_event_history.get(job_id, []):
             await websocket.send_json(event)
+            if event["type"] in {"finished", "error", "cancelled"}:
+                await websocket.close(code=1000)
+                return
         while True:
             event = await queue.get()
             await websocket.send_json(event)
+            if event["type"] in {"finished", "error", "cancelled"}:
+                await websocket.close(code=1000)
+                return
     except WebSocketDisconnect:
         pass
     finally:

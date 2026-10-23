@@ -37,6 +37,8 @@ function getNodes() {
     outputPath: document.querySelector("#output-path"),
     chooseOutputFolder: document.querySelector("#choose-output-folder"),
     downloadPlaylist: document.querySelector("#download-playlist"),
+    ukrainianAudio: document.querySelector("#ukrainian-audio"),
+    ukrainianAudioOptions: document.querySelector("#ukrainian-audio-options"),
     writeAutoSubs: document.querySelector("#write-auto-subs"),
     autoSubsRow: document.querySelector("#auto-subs-row"),
     writeThumbnail: document.querySelector("#write-thumbnail"),
@@ -60,7 +62,7 @@ function bindEvents() {
   nodes.openOutputFolder.addEventListener("click", openOutputFolder);
 }
 
-async function loadConfig() {
+async function loadConfig(updateFormStatus = true) {
   try {
     const response = await fetch("/api/web-dlp/config", { cache: "no-store" });
     if (!response.ok) {
@@ -72,16 +74,17 @@ async function loadConfig() {
       ? `yt-dlp is available. Output folder: ${config.output_dir}`
       : "yt-dlp is not installed in this environment. Use Update yt-dlp first.";
     nodes.runtimeStatus.className = config.has_yt_dlp ? "status" : "status error";
-    setFormStatus("Ready.");
+    if (updateFormStatus) setFormStatus("Ready.");
   } catch (error) {
     nodes.runtimeStatus.textContent = error.message;
     nodes.runtimeStatus.className = "status error";
-    setFormStatus(error.message, true);
+    if (updateFormStatus) setFormStatus(error.message, true);
   }
 }
 
 function updateOperationView() {
   const operation = nodes.operation.value;
+  nodes.ukrainianAudioOptions.classList.toggle("hidden", !["download_video", "extract_audio"].includes(operation));
   nodes.videoOptions.classList.toggle("hidden", operation !== "download_video");
   nodes.audioOptions.classList.toggle("hidden", operation !== "extract_audio");
   nodes.subtitleOptions.classList.toggle("hidden", operation !== "download_subtitles");
@@ -114,6 +117,9 @@ async function startJob(event) {
   prepareJobUi("Preparing...");
   appendConsole(`Queued URL: ${payload.url}`);
   appendConsole(`Operation: ${payload.operation}`);
+  if (payload.options.ukrainian_audio) {
+    appendConsole("Українська аудіодоріжка: включно з ШІ-дубляжем, без заміни іншою мовою.");
+  }
   if (payload.output_path) {
     appendConsole(`Output folder: ${payload.output_path}`);
   }
@@ -166,6 +172,10 @@ function buildPayload() {
       cookies_browser: nodes.cookiesBrowser.value,
     },
   };
+
+  if (["download_video", "extract_audio"].includes(operation)) {
+    payload.options.ukrainian_audio = nodes.ukrainianAudio.checked;
+  }
 
   const outputPath = nodes.outputPath.value.trim();
   if (outputPath) {
@@ -277,6 +287,7 @@ async function cancelCurrentJob() {
 }
 
 function prepareJobUi(buttonText) {
+  closeJobSocket();
   clearConsole();
   currentJobId = null;
   nodes.startJob.disabled = true;
@@ -299,14 +310,25 @@ function startJobConsole(job, buttonText) {
   connectJobSocket(job.id);
 }
 
-function connectJobSocket(jobId) {
-  if (jobSocket) {
-    jobSocket.close();
-  }
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  jobSocket = new WebSocket(`${protocol}//${window.location.host}/api/web-dlp/jobs/${jobId}/events`);
+function closeJobSocket() {
+  const socket = jobSocket;
+  jobSocket = null;
+  if (!socket) return;
+  socket.onmessage = null;
+  socket.onerror = null;
+  socket.onclose = null;
+  socket.close();
+}
 
-  jobSocket.onmessage = (event) => {
+function connectJobSocket(jobId) {
+  closeJobSocket();
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(`${protocol}//${window.location.host}/api/web-dlp/jobs/${jobId}/events`);
+
+  jobSocket = socket;
+
+  socket.onmessage = (event) => {
+    if (jobSocket !== socket) return;
     const message = JSON.parse(event.data);
     if (message.type === "status") {
       setJobState(message.data.status);
@@ -324,7 +346,7 @@ function connectJobSocket(jobId) {
       appendConsole(`[DONE] ${message.data.message}`);
       setFormStatus(message.data.output_path ? `Finished: ${message.data.output_path}` : message.data.message);
       resetButtons();
-      loadConfig();
+      loadConfig(false);
       return;
     }
     if (message.type === "error") {
@@ -339,7 +361,8 @@ function connectJobSocket(jobId) {
     }
   };
 
-  jobSocket.onerror = () => {
+  socket.onerror = () => {
+    if (jobSocket !== socket) return;
     appendConsole("[ERROR] Console connection failed.");
     setFormStatus("Console connection failed.", true);
     resetButtons();
@@ -366,6 +389,7 @@ function invalid(message) {
 }
 
 function resetButtons() {
+  closeJobSocket();
   currentJobId = null;
   nodes.startJob.disabled = false;
   nodes.updateYtdlp.disabled = false;
