@@ -344,7 +344,7 @@ function connectJobSocket(jobId) {
         lastOutputPath = message.data.output_path;
       }
       appendConsole(`[DONE] ${message.data.message}`);
-      setFormStatus(message.data.output_path ? `Finished: ${message.data.output_path}` : message.data.message);
+      setFormStatus(message.data.message || `Finished: ${message.data.output_path}`);
       resetButtons();
       loadConfig(false);
       return;

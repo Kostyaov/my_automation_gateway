@@ -616,7 +616,12 @@ def build_web_dlp_command(payload: WebDlpJobRequest) -> tuple[list[str], Path]:
         command.extend(["-x", "--audio-format", audio_format, "--audio-quality", "0"])
     elif operation == "download_subtitles":
         language = web_dlp_option_str(options, "subtitle_languages", "uk,en,ru")
-        command.extend(["--skip-download", "--write-subs", "--sub-langs", language, "--convert-subs", "srt"])
+        command.extend([
+            "--skip-download", "--write-subs", "--sub-langs", language,
+            "--sub-format", "srt/vtt/best", "--convert-subs", "srt",
+            "--no-simulate", "--no-quiet",
+            "--print", 'after_video:GATEWAY_SUBTITLES:%(requested_subtitles.:.filepath)j',
+        ])
         if web_dlp_option_bool(options, "write_auto_subs", True):
             command.append("--write-auto-subs")
     elif operation == "metadata":
@@ -1262,6 +1267,25 @@ async def publish_web_dlp_event(job_id: str, event_type: str, data: dict[str, An
             pass
 
 
+def web_dlp_subtitle_paths(text: str, output_dir: str) -> list[str]:
+    """Only report nonempty SRT files confirmed by this job's metadata."""
+    try:
+        subtitles = json.loads(text.removeprefix("GATEWAY_SUBTITLES:"))
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(subtitles, list):
+        return []
+    directory = Path(output_dir).resolve()
+    paths = []
+    for subtitle in subtitles:
+        if not isinstance(subtitle, str) or not subtitle:
+            continue
+        path = Path(subtitle).resolve()
+        if path.suffix.lower() == ".srt" and path.is_relative_to(directory) and path.is_file() and path.stat().st_size:
+            paths.append(str(path))
+    return paths
+
+
 async def read_web_dlp_stream(job_id: str, stream: asyncio.StreamReader, label: str) -> None:
     while True:
         line = await stream.readline()
@@ -1269,6 +1293,14 @@ async def read_web_dlp_stream(job_id: str, stream: asyncio.StreamReader, label: 
             break
         text = line.decode(errors="replace").rstrip()
         if text:
+            if text.startswith("GATEWAY_SUBTITLES:") and web_dlp_jobs[job_id]["operation"] == "download_subtitles":
+                job = web_dlp_jobs[job_id]
+                files = job.setdefault("subtitle_files", [])
+                for path in web_dlp_subtitle_paths(text, job["output_path"]):
+                    if path not in files:
+                        files.append(path)
+                        await publish_web_dlp_event(job_id, "log", {"message": f"[SRT] Збережено: {path}"})
+                continue
             if text.startswith("[SUMMARY] "):
                 web_dlp_jobs[job_id]["playlist_summary"] = text.removeprefix("[SUMMARY] ")
             if "Requested format is not available" in text and web_dlp_option_bool(
@@ -1356,6 +1388,13 @@ async def run_web_dlp_job(job_id: str) -> None:
             await mark_web_dlp_job_cancelled(job_id)
             return
 
+        if return_code == 0 and job["operation"] == "download_subtitles" and not job.get("subtitle_files"):
+            job["selection_error"] = (
+                "SRT-файлів не створено. Перевірте вибрані мови та доступність субтитрів; "
+                "за потреби увімкніть автоматичні субтитри. Подробиці — у консолі."
+            )
+            return_code = 1
+
         if return_code == 0:
             job["status"] = "finished"
             await publish_web_dlp_event(
@@ -1364,7 +1403,10 @@ async def run_web_dlp_job(job_id: str) -> None:
                 {
                     "status": "finished",
                     "output_path": job.get("output_path"),
-                    "message": job.get("playlist_summary") or f"Finished: {job['operation']}",
+                    "message": (
+                        f"Збережено SRT-файлів: {len(job['subtitle_files'])}. Папка: {job['output_path']}"
+                        if job.get("subtitle_files") else job.get("playlist_summary") or f"Finished: {job['operation']}"
+                    ),
                 },
             )
         else:
